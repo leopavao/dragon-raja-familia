@@ -1,0 +1,91 @@
+#pragma once
+#include <stdint.h>
+
+const int CMD_LOCAL_ADMIN = 32690;
+const int CMD_LOCAL_ADMIN_CATALOG = 32691;
+const uint32_t LOCAL_ADMIN_VERSION = 3;
+const int LOCAL_ADMIN_ATTRIBUTE_COUNT = 11;
+
+enum LocalAdminOperation
+{
+    LA_READ = 1,
+    LA_ATTRIBUTES,
+    LA_GOLD,
+    LA_BANK,
+    LA_EMBLEMS,
+    LA_PREVIEW,
+    LA_CREATE,
+    LA_UNDO_ATTRIBUTES,
+    LA_DUAL,
+    LA_SYMBOL,
+    LA_PROGRESSION,
+    LA_SUMMON
+};
+
+#pragma pack(push, 1)
+struct LocalAdminState
+{
+    char character[20];
+    int32_t attributes[LOCAL_ADMIN_ATTRIBUTE_COUNT];
+    int32_t level;
+    uint32_t experience;
+    int32_t points;
+    uint32_t gold;
+    uint32_t bank;
+    uint32_t emblems;
+    int32_t baseClass, dualClass, dualStep, symbolGrade, symbolNumber;
+    int32_t fame, ladder, combatPoints;
+    uint8_t skills[200];
+    uint8_t wizard[200], priest[200];
+    uint32_t tacticExp[13];
+    uint32_t workExp[45], workRare[45];
+    int32_t extraProgress[7];
+};
+
+struct LocalAdminRequest
+{
+    uint32_t version;
+    uint32_t operation;
+    uint32_t requestId;
+    uint32_t previewToken;
+    LocalAdminState state;
+    int32_t itemNumber;
+    int32_t quantity;
+    int32_t durability;
+    int32_t grade;
+    int32_t effects[3];
+    int32_t dynamicEffect;
+    int32_t highItem;
+    int32_t progressionKind, progressionIndex, progressionLevel;
+    uint32_t progressionExp, progressionRare;
+};
+
+struct LocalAdminReply
+{
+    uint32_t version;
+    uint32_t operation;
+    uint32_t requestId;
+    uint32_t success;
+    uint32_t previewToken;
+    uint32_t canUndo;
+    LocalAdminState state;
+    char message[256];
+};
+
+struct LocalAdminEffect
+{
+    int32_t id;
+    int32_t dynamicEffect;
+    char name[100];
+};
+
+struct LocalAdminCatalog
+{
+    uint32_t version;
+    uint32_t requestId;
+    uint32_t first;
+    uint32_t last;
+    uint32_t count;
+    LocalAdminEffect effects[24];
+};
+#pragma pack(pop)

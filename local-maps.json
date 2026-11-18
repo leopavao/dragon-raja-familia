@@ -1,0 +1,730 @@
+[
+  {
+    "Number": 0,
+    "File": "MA-IN",
+    "Name": "Helternt village",
+    "Port": 5000,
+    "Available": true
+  },
+  {
+    "Number": 1,
+    "File": "K_SUNG2",
+    "Name": "Helternt Castle",
+    "Port": 5010,
+    "Available": true
+  },
+  {
+    "Number": 2,
+    "File": "FIREDUN1",
+    "Name": "Fire Dungeon",
+    "Port": 5020,
+    "Available": true
+  },
+  {
+    "Number": 3,
+    "File": "ICE-W01",
+    "Name": "Ice Dungeon",
+    "Port": 5030,
+    "Available": true
+  },
+  {
+    "Number": 4,
+    "File": "SOURCE",
+    "Name": "The Hudyne River",
+    "Port": 5040,
+    "Available": true
+  },
+  {
+    "Number": 5,
+    "File": "MANDUN1",
+    "Name": "Manmade Dungeon",
+    "Port": 5050,
+    "Available": true
+  },
+  {
+    "Number": 6,
+    "File": "SUNG_TILE_00",
+    "Name": "itemsearch",
+    "Port": 5060,
+    "Available": true
+  },
+  {
+    "Number": 7,
+    "File": "FIREDUN2",
+    "Name": "Fire Dungeon",
+    "Port": 5070,
+    "Available": true
+  },
+  {
+    "Number": 8,
+    "File": "FIREDUN3",
+    "Name": "Fire Dungeon",
+    "Port": 5080,
+    "Available": true
+  },
+  {
+    "Number": 9,
+    "File": "ICE-W02",
+    "Name": "Ice Dungeon",
+    "Port": 5090,
+    "Available": true
+  },
+  {
+    "Number": 10,
+    "File": "ICE-W03",
+    "Name": "Ice Dungeon",
+    "Port": 5100,
+    "Available": true
+  },
+  {
+    "Number": 11,
+    "File": "MANDUN2",
+    "Name": "Manmade Dungeon",
+    "Port": 5110,
+    "Available": true
+  },
+  {
+    "Number": 12,
+    "File": "MANDUN3",
+    "Name": "Manmade Dungeon",
+    "Port": 5120,
+    "Available": true
+  },
+  {
+    "Number": 13,
+    "File": "HU_VM",
+    "Name": "Hudyne Valley",
+    "Port": 5130,
+    "Available": true
+  },
+  {
+    "Number": 14,
+    "File": "GRAY",
+    "Name": "Gray Mounts",
+    "Port": 5140,
+    "Available": true
+  },
+  {
+    "Number": 15,
+    "File": "TRAINING",
+    "Name": "Training Center",
+    "Port": 5150,
+    "Available": true
+  },
+  {
+    "Number": 16,
+    "File": "FIGHT",
+    "Name": "Core Arena",
+    "Port": 5160,
+    "Available": true
+  },
+  {
+    "Number": 17,
+    "File": "KAL_OS",
+    "Name": "The Outside of Kalaile",
+    "Port": 5170,
+    "Available": true
+  },
+  {
+    "Number": 18,
+    "File": "COLOR",
+    "Name": "Kalaile Village",
+    "Port": 5180,
+    "Available": true
+  },
+  {
+    "Number": 19,
+    "File": "RENES_C",
+    "Name": "Renus",
+    "Port": 5190,
+    "Available": true
+  },
+  {
+    "Number": 20,
+    "File": "MINI",
+    "Name": "Mini Dungeon",
+    "Port": 5200,
+    "Available": true
+  },
+  {
+    "Number": 21,
+    "File": "DARKDUN1",
+    "Name": "Dark dungeon",
+    "Port": 5210,
+    "Available": true
+  },
+  {
+    "Number": 22,
+    "File": "RENES_OUT",
+    "Name": "Renus Out",
+    "Port": 5220,
+    "Available": true
+  },
+  {
+    "Number": 23,
+    "File": "DESERT",
+    "Name": "Desert",
+    "Port": 5230,
+    "Available": true
+  },
+  {
+    "Number": 24,
+    "File": "SN_1F",
+    "Name": "Baron Shilikan's Mansion",
+    "Port": 5240,
+    "Available": true
+  },
+  {
+    "Number": 25,
+    "File": "event2",
+    "Name": "OX quiz",
+    "Port": 5250,
+    "Available": true
+  },
+  {
+    "Number": 26,
+    "File": "EASY",
+    "Name": "Elmentary Guide",
+    "Port": 5260,
+    "Available": true
+  },
+  {
+    "Number": 27,
+    "File": "EVENT1",
+    "Name": "Gray Mountains",
+    "Port": 5270,
+    "Available": true
+  },
+  {
+    "Number": 28,
+    "File": "DARKDUN2",
+    "Name": "Dark Dungeon",
+    "Port": 5280,
+    "Available": true
+  },
+  {
+    "Number": 29,
+    "File": "DARKDUN3",
+    "Name": "Dark Dungeon",
+    "Port": 5290,
+    "Available": true
+  },
+  {
+    "Number": 30,
+    "File": "SCHOLIUM",
+    "Name": "SCHOLIUM1",
+    "Port": 5300,
+    "Available": true
+  },
+  {
+    "Number": 31,
+    "File": "BIS_I",
+    "Name": "Vyseus Impel",
+    "Port": 5310,
+    "Available": true
+  },
+  {
+    "Number": 32,
+    "File": "IRAMUS",
+    "Name": "Iramus",
+    "Port": 5320,
+    "Available": true
+  },
+  {
+    "Number": 33,
+    "File": "DEP",
+    "Name": "Deepuben",
+    "Port": 5330,
+    "Available": true
+  },
+  {
+    "Number": 34,
+    "File": "BATTLE",
+    "Name": "Battle",
+    "Port": 5340,
+    "Available": false
+  },
+  {
+    "Number": 35,
+    "File": "KAELUNE",
+    "Name": "KAELUNE",
+    "Port": 5350,
+    "Available": false
+  },
+  {
+    "Number": 36,
+    "File": "TYNEN",
+    "Name": "TYNEN",
+    "Port": 5360,
+    "Available": true
+  },
+  {
+    "Number": 37,
+    "File": "MINI2",
+    "Name": "Mini Dungeon",
+    "Port": 5370,
+    "Available": true
+  },
+  {
+    "Number": 38,
+    "File": "MINI3",
+    "Name": "Mini Dungeon",
+    "Port": 5380,
+    "Available": true
+  },
+  {
+    "Number": 39,
+    "File": "EVENTLW",
+    "Name": "Man-to-man Dual Center",
+    "Port": 5390,
+    "Available": true
+  },
+  {
+    "Number": 40,
+    "File": "WATERDUN1",
+    "Name": "Water dungeon1",
+    "Port": 5400,
+    "Available": true
+  },
+  {
+    "Number": 41,
+    "File": "DESERT2",
+    "Name": "The west of desert",
+    "Port": 5410,
+    "Available": true
+  },
+  {
+    "Number": 42,
+    "File": "B_DESERT",
+    "Name": "The Great Desert",
+    "Port": 5420,
+    "Available": true
+  },
+  {
+    "Number": 43,
+    "File": "BIG_G",
+    "Name": "The Great Grassland",
+    "Port": 5430,
+    "Available": true
+  },
+  {
+    "Number": 44,
+    "File": "FIGHT2",
+    "Name": "Arena2",
+    "Port": 5440,
+    "Available": false
+  },
+  {
+    "Number": 45,
+    "File": "ANTSDUN1",
+    "Name": "Underground Dungeon",
+    "Port": 5450,
+    "Available": true
+  },
+  {
+    "Number": 46,
+    "File": "TRAINING2",
+    "Name": "Training Center",
+    "Port": 5460,
+    "Available": true
+  },
+  {
+    "Number": 47,
+    "File": "TRAINING_1",
+    "Name": "Long range Training",
+    "Port": 5470,
+    "Available": true
+  },
+  {
+    "Number": 48,
+    "File": "TRAINING_2",
+    "Name": "Magic Training",
+    "Port": 5480,
+    "Available": true
+  },
+  {
+    "Number": 49,
+    "File": "TRAINING_3",
+    "Name": "Extention Training",
+    "Port": 5490,
+    "Available": true
+  },
+  {
+    "Number": 50,
+    "File": "TRAINING2_1",
+    "Name": "Long range Training2",
+    "Port": 5500,
+    "Available": true
+  },
+  {
+    "Number": 51,
+    "File": "TRAINING2_2",
+    "Name": "Magic Training2",
+    "Port": 5510,
+    "Available": true
+  },
+  {
+    "Number": 52,
+    "File": "TRAINING2_3",
+    "Name": "Extention Training2",
+    "Port": 5520,
+    "Available": true
+  },
+  {
+    "Number": 53,
+    "File": "DUNMAZE",
+    "Name": "Castle Arena",
+    "Port": 5530,
+    "Available": true
+  },
+  {
+    "Number": 54,
+    "File": "HOUSE",
+    "Name": "House Arena",
+    "Port": 5540,
+    "Available": false
+  },
+  {
+    "Number": 55,
+    "File": "BIG_TREE",
+    "Name": "The Great Jungle",
+    "Port": 5550,
+    "Available": true
+  },
+  {
+    "Number": 56,
+    "File": "HILL",
+    "Name": "Hill Arena",
+    "Port": 5560,
+    "Available": false
+  },
+  {
+    "Number": 57,
+    "File": "G_BATTLE",
+    "Name": "Colussus Arena",
+    "Port": 5570,
+    "Available": true
+  },
+  {
+    "Number": 58,
+    "File": "BIG_VALLEY",
+    "Name": "The Great Valley",
+    "Port": 5580,
+    "Available": true
+  },
+  {
+    "Number": 59,
+    "File": "waterdun2",
+    "Name": "Water Dungeon 2",
+    "Port": 5590,
+    "Available": true
+  },
+  {
+    "Number": 60,
+    "File": "lightdun1",
+    "Name": "Light Dungeon",
+    "Port": 5600,
+    "Available": true
+  },
+  {
+    "Number": 61,
+    "File": "sedless",
+    "Name": "Sedless",
+    "Port": 5610,
+    "Available": true
+  },
+  {
+    "Number": 62,
+    "File": "barantan",
+    "Name": "Barantan",
+    "Port": 5620,
+    "Available": true
+  },
+  {
+    "Number": 63,
+    "File": "west",
+    "Name": "Red Mounts",
+    "Port": 5630,
+    "Available": true
+  },
+  {
+    "Number": 64,
+    "File": "jolran",
+    "Name": "Jorlan",
+    "Port": 5640,
+    "Available": true
+  },
+  {
+    "Number": 65,
+    "File": "training3",
+    "Name": "Guild Managing Center",
+    "Port": 5650,
+    "Available": true
+  },
+  {
+    "Number": 66,
+    "File": "training3_1",
+    "Name": "Long range Training3",
+    "Port": 5660,
+    "Available": true
+  },
+  {
+    "Number": 67,
+    "File": "training3_2",
+    "Name": "Magic Training3",
+    "Port": 5670,
+    "Available": true
+  },
+  {
+    "Number": 68,
+    "File": "training3_3",
+    "Name": "Extension Training3",
+    "Port": 5680,
+    "Available": true
+  },
+  {
+    "Number": 69,
+    "File": "Nation1",
+    "Name": "Mountain Warfield",
+    "Port": 5991,
+    "Available": true
+  },
+  {
+    "Number": 70,
+    "File": "Nation2",
+    "Name": "Pairie Warfield",
+    "Port": 5992,
+    "Available": true
+  },
+  {
+    "Number": 71,
+    "File": "Nation3",
+    "Name": "Island warfield",
+    "Port": 5993,
+    "Available": true
+  },
+  {
+    "Number": 72,
+    "File": "stone",
+    "Name": "Stone Arena",
+    "Port": 5690,
+    "Available": true
+  },
+  {
+    "Number": 73,
+    "File": "abyss_1",
+    "Name": "Abyss maze",
+    "Port": 5700,
+    "Available": true
+  },
+  {
+    "Number": 74,
+    "File": "abyss_2",
+    "Name": "Abyss maze",
+    "Port": 5710,
+    "Available": true
+  },
+  {
+    "Number": 75,
+    "File": "bigmaze_1",
+    "Name": "Big maze",
+    "Port": 5720,
+    "Available": true
+  },
+  {
+    "Number": 76,
+    "File": "bigmaze_2",
+    "Name": "Big maze",
+    "Port": 5730,
+    "Available": true
+  },
+  {
+    "Number": 77,
+    "File": "undead_1",
+    "Name": "Undead dungeon",
+    "Port": 5740,
+    "Available": true
+  },
+  {
+    "Number": 78,
+    "File": "undead_2",
+    "Name": "Undead dungeon",
+    "Port": 5750,
+    "Available": true
+  },
+  {
+    "Number": 79,
+    "File": "hegmonia",
+    "Name": "Hegemonia",
+    "Port": 5760,
+    "Available": true
+  },
+  {
+    "Number": 80,
+    "File": "w_glade",
+    "Name": "West Glade",
+    "Port": 5770,
+    "Available": true
+  },
+  {
+    "Number": 81,
+    "File": "gm_event",
+    "Name": "LMS Arena",
+    "Port": 5780,
+    "Available": true
+  },
+  {
+    "Number": 82,
+    "File": "lethe",
+    "Name": "Lethe's Reign",
+    "Port": 5800,
+    "Available": true
+  },
+  {
+    "Number": 83,
+    "File": "lethe_hill",
+    "Name": "Lethe's mountains",
+    "Port": 5810,
+    "Available": true
+  },
+  {
+    "Number": 84,
+    "File": "lethe_river",
+    "Name": "Lethe's river",
+    "Port": 5820,
+    "Available": true
+  },
+  {
+    "Number": 85,
+    "File": "SCHOLIUM2",
+    "Name": "SCHOLIUM2",
+    "Port": 5830,
+    "Available": true
+  },
+  {
+    "Number": 86,
+    "File": "Nation4",
+    "Name": "Snow Warfield",
+    "Port": 5980,
+    "Available": true
+  },
+  {
+    "Number": 87,
+    "File": "northern_w",
+    "Name": "Northern Wanen",
+    "Port": 5801,
+    "Available": true
+  },
+  {
+    "Number": 88,
+    "File": "western_w",
+    "Name": "Western Wanen",
+    "Port": 5802,
+    "Available": true
+  },
+  {
+    "Number": 89,
+    "File": "eastern_w",
+    "Name": "Eastern Wanen",
+    "Port": 5803,
+    "Available": true
+  },
+  {
+    "Number": 90,
+    "File": "sermenys_d1",
+    "Name": "Sermenys Dungeon1",
+    "Port": 5811,
+    "Available": true
+  },
+  {
+    "Number": 91,
+    "File": "sermenys_d2",
+    "Name": "Sermenys Dungeon2",
+    "Port": 5812,
+    "Available": true
+  },
+  {
+    "Number": 92,
+    "File": "Naurchen",
+    "Name": "Naurchen",
+    "Port": 5813,
+    "Available": true
+  },
+  {
+    "Number": 93,
+    "File": "Castle2",
+    "Name": "Catstle Arena",
+    "Port": 5814,
+    "Available": true
+  },
+  {
+    "Number": 94,
+    "File": "Venom1",
+    "Name": "Venom Dungeon1",
+    "Port": 5815,
+    "Available": true
+  },
+  {
+    "Number": 95,
+    "File": "Venom2",
+    "Name": "Venom Dungeon2",
+    "Port": 5816,
+    "Available": true
+  },
+  {
+    "Number": 96,
+    "File": "Venom3",
+    "Name": "Venom Dungeon3",
+    "Port": 5817,
+    "Available": true
+  },
+  {
+    "Number": 97,
+    "File": "mon_arena",
+    "Name": "Monster Arena",
+    "Port": 5001,
+    "Available": true
+  },
+  {
+    "Number": 98,
+    "File": "mon_arena2",
+    "Name": "monster Arean2",
+    "Port": 5819,
+    "Available": false
+  },
+  {
+    "Number": 99,
+    "File": "sky1",
+    "Name": "Knocker's Tower",
+    "Port": 5821,
+    "Available": true
+  },
+  {
+    "Number": 100,
+    "File": "sky2",
+    "Name": "Seeker's Tower",
+    "Port": 5822,
+    "Available": true
+  },
+  {
+    "Number": 101,
+    "File": "nation5",
+    "Name": "????",
+    "Port": 5994,
+    "Available": true
+  },
+  {
+    "Number": 102,
+    "File": "ITEM_LOG",
+    "Name": "??",
+    "Port": 5999,
+    "Available": false
+  },
+  {
+    "Number": 103,
+    "File": "premium",
+    "Name": "Premium Map",
+    "Port": 5823,
+    "Available": true
+  }
+]
