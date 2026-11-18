@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "../Shared/LocalAdminProtocol.h"
 #include "packed.h"
 #include "servertable.h"
 #include "MAIN.H"
@@ -142,12 +143,24 @@ int HandleReading(t_connection c[], int cn)
 }
 
 //---------------------------------------------------------------------------------
+extern bool VerifyLocalAdminTactics(const LocalAdminTacticVerification& verification);
+
 int HandleCommand(t_connection c[], DWORD dwIndex, t_packet *packet, DWORD dwUserID, int cn)
 {
 	const int ttype	= packet->h.header.type;
 	switch(ttype)
 	{
-	case CMD_NONE :
+	case CMD_LOCAL_ADMIN_VERIFY_TACTICS:
+        {
+            if (packet->h.header.size != sizeof(LocalAdminTacticVerification)) break;
+            LocalAdminTacticVerification verification;
+            memcpy(&verification, &packet->u, sizeof(verification));
+            verification.verified = VerifyLocalAdminTactics(verification) ? 1 : 0;
+            memcpy(&packet->u, &verification, sizeof(verification));
+            QueuePacket(c, cn, packet, 1);
+            break;
+        }
+    case CMD_NONE :
 		break;
 	case CMD_PING :
 		break;

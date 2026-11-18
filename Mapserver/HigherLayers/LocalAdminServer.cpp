@@ -18,9 +18,14 @@
 #include "Npclist.h"
 #include "Op_magic.h"
 #include "Map.h"
+#include "MapInfo.h"
 #include <map>
+#include <deque>
+#include <stdarg.h>
 #include <string>
 
+extern void QuestTeleport(int connection, int x, int y);
+extern void SendBBS2(char* text, short connection);
 extern void ResetAbility(CHARLIST* character);
 extern int AddCRC(void* source, int size, int step);
 extern void SendLoginServerForCharUpdate(short cn);
@@ -47,6 +52,85 @@ namespace
     std::map<int, AttributeUndo> undoAttributes;
     DWORD nextPreviewToken = 0;
     std::map<int, DWORD> summonTimes;
+    DWORD nextSummonGroup = 0;
+    std::map<DWORD, DWORD> eventGroups;
+    struct RosterRequest
+    {
+        DWORD ticket, playerId, requestId, started;
+    };
+    std::map<int, RosterRequest> rosterRequests;
+    DWORD nextRosterTicket = 0;
+    const char* auditPath = "./gm-audit.log";
+
+    void AppendDetails(LocalAdminReply& reply, const char* format, ...)
+    {
+        const size_t used = strlen(reply.details);
+        if (used >= sizeof(reply.details) - 1) return;
+        va_list args;
+        va_start(args, format);
+        _vsnprintf_s(reply.details + used, sizeof(reply.details) - used, _TRUNCATE, format, args);
+        va_end(args);
+    }
+
+    void AppendMapRoster(LocalAdminReply& reply)
+    {
+        AppendDetails(reply, "%s:", MapName);
+        int players = 0;
+        for (int i = DRAGON_CONNECTIONS_START; i < DRAGON_MAX_CONNECTIONS; ++i)
+        {
+            if (connections[i].state != CONNECT_JOIN || !CheckServerId(i)) continue;
+            if (players < 40) AppendDetails(reply, " %.19s", connections[i].name);
+            ++players;
+        }
+        if (players > 40) AppendDetails(reply, " ...");
+        AppendDetails(reply, " (%d)\r\n", players);
+    }
+
+    void SendRoster(WORD port, const LocalAdminMapRoster& roster)
+    {
+        t_packet packet = {};
+        packet.h.header.type = CMD_LOCAL_ADMIN_MAP_ROSTER;
+        packet.h.header.size = sizeof(roster);
+        memcpy(&packet.u, &roster, sizeof(roster));
+        g_pServerTable->SendRajaPacketToOtherMapServer(port, reinterpret_cast<char*>(&packet),
+            packet.h.header.size + sizeof(t_header));
+    }
+
+    void Audit(int connection, const LocalAdminRequest& request, const LocalAdminReply& reply)
+    {
+        FILE* file = fopen(auditPath, "a");
+        if (!file) return;
+        SYSTEMTIME now;
+        GetLocalTime(&now);
+        fprintf(file, "%04u-%02u-%02u %02u:%02u:%02u | %.19s | %.19s | operacao %u | alvo %.19s | item %d | quantidade %d | sucesso %u\n",
+            now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
+            connections[connection].id, reply.state.character, request.operation, request.target,
+            request.itemNumber, request.quantity, reply.success);
+        fclose(file);
+    }
+    struct TacticSave
+    {
+        DWORD playerId;
+        LocalAdminReply reply;
+    };
+    std::map<int, TacticSave> tacticSaves;
+    struct TacticUndo
+    {
+        std::string character;
+        DWORD playerId;
+        int index, oldStep, newStep;
+        DWORD oldExperience, newExperience;
+    };
+    std::map<int, TacticUndo> tacticUndo;
+
+    void SendAdminReply(int connection, const LocalAdminReply& reply)
+    {
+        t_packet packet = {};
+        packet.h.header.type = CMD_LOCAL_ADMIN;
+        packet.h.header.size = sizeof(reply);
+        memcpy(&packet.u, &reply, sizeof(reply));
+        QueuePacket(connections, connection, &packet, 1);
+    }
 
     int MaximizeSummonDropRarity(CHARLIST* npc)
     {
@@ -175,6 +259,10 @@ namespace
         memcpy(state.wizard, ch->Ws, sizeof(state.wizard));
         memcpy(state.priest, ch->Ps, sizeof(state.priest));
         memcpy(state.tacticExp, ch->tac_skillEXP, sizeof(state.tacticExp));
+        for (int i = 0; i < NO_TAC; ++i) state.tacticStep[i] = ch->GetTacticsStep(i);
+        strcpy_s(state.map, MapName);
+        state.mapX = ch->X / TILE_SIZE;
+        state.mapY = ch->Y / TILE_SIZE;
         for (int i = 0; i < 45; ++i) {
             state.workExp[i] = ch->skillexp[i].skillexp;
             state.workRare[i] = ch->skillexp[i].rare;
@@ -188,6 +276,33 @@ namespace
                 return false;
         return state.level >= 1 && state.level <= MAX_EXP_LEVEL &&
             state.points >= 0 && state.points <= 32767;
+    }
+
+    bool GetTacticStartingExperience(int level, DWORD& experience)
+    {
+        if (level < 1 || level > MAX_TAC_LEVEL || level >= Num_Of_NPC_Lev) return false;
+        const NPCLev_to_Exp& range = NPC_Lev_Ref[level];
+        int minimum = range.nMinExp;
+        if (minimum < 0 || range.nMaxExp <= 0) return false;
+        // Login and the client select the first matching upper bound in this step.
+        for (int previous = 1; previous < level; ++previous)
+        {
+            const NPCLev_to_Exp& earlier = NPC_Lev_Ref[previous];
+            if (earlier.nStep != range.nStep || minimum > earlier.nMaxExp) continue;
+            if (earlier.nMaxExp >= range.nMaxExp) return false;
+            minimum = earlier.nMaxExp + 1;
+        }
+        if (minimum > range.nMaxExp) return false;
+        experience = minimum;
+        return true;
+    }
+
+    void SetTactic(CHARLIST* ch, int index, int level, DWORD experience)
+    {
+        ch->SetTacticsStep(index, NPC_Lev_Ref[level].nStep);
+        ch->tac_skillEXP[index] = experience;
+        ch->ConvertTacticsLevel(index);
+        ch->SendCharInfoTactic(index);
     }
 
     bool ValidCombatTotal(CHARLIST* ch, int points, int changed = -1, int newLevel = 0)
@@ -280,7 +395,7 @@ namespace
             request.quantity < 1 || request.quantity > 1000000 ||
             request.durability < 0 || request.durability > 65535 ||
             request.grade < 0 || request.grade > 15 ||
-            request.highItem < 0 || request.highItem > 1 ||
+            request.highItem < 0 || request.highItem > H_LV_LEGEND_ITEM ||
             request.dynamicEffect < 0 || request.dynamicEffect > 1)
         {
             strcpy_s(message, size, "Item ou valores fora da faixa suportada.");
@@ -298,6 +413,50 @@ namespace
             strcpy_s(message, size, "Itens individuais limitados a 72 por operacao.");
             return false;
         }
+        if (request.highItem == H_LV_LEGEND_ITEM)
+        {
+            const int legendGroup = definition->GetLegendGroup();
+            if (stackable || request.dynamicEffect || !definition->GetLegendAble() ||
+                legendGroup < 1 || legendGroup >= MAX_ITEM_LEGEND)
+            {
+                strcpy_s(message, size, "Este item nao aceita Legend.");
+                return false;
+            }
+
+            if (request.legendVariant)
+            {
+                const int variant = request.legendVariant;
+                const int effect = variant > 0 && variant < MAX_ITEM_LEGEND_SUB &&
+                    variant <= RareEM.GetLegendVariantCount(legendGroup) ?
+                    RareEM.GetLegendBasicRareKind(legendGroup, variant, definition->GetWearAble()) : 0;
+                if (effect <= 0 || effect >= MAX_ITEM_RARE || request.grade < 3 || request.grade > 8)
+                {
+                    strcpy_s(message, size, "Variante Legend invalida para este item. Escolha grau de 3 a 8.");
+                    return false;
+                }
+                draft.item = GenerateItem(request.itemNumber);
+                ItemMgr.MakeRareAttr(draft.item.attr[IATTR_RARE_MAIN], request.grade, effect,
+                    legendGroup, variant, H_LV_LEGEND_ITEM, false);
+            }
+            else draft.item = ItemMgr.GiveLegendItem(request.itemNumber);
+            RareMain legend = {};
+            memcpy(&legend, &draft.item.attr[IATTR_RARE_MAIN], sizeof(legend));
+            if (!draft.item.item_no || legend.iHighLevel != H_LV_LEGEND_ITEM ||
+                !legend.grade || !legend.soksung1 || !legend.soksung2 || !legend.soksung3)
+            {
+                strcpy_s(message, size, "Nao foi possivel gerar um Legend com as tabelas do servidor.");
+                return false;
+            }
+            draft.copies = request.quantity;
+            if (request.durability)
+                draft.item.attr[IATTR_DURATION] = MAKELONG(request.durability, request.durability);
+            sprintf_s(message, size, "%s | ID %d\r\nLegend | Grau %d | Quantidade %d\r\nEfeito %d | Grupo %d | Variante %d\r\nDurabilidade %u / %u",
+                definition->GetHanName(), request.itemNumber, int(legend.grade), draft.copies,
+                int(legend.soksung1), int(legend.soksung2), int(legend.soksung3),
+                LOWORD(draft.item.attr[IATTR_DURATION]), HIWORD(draft.item.attr[IATTR_DURATION]));
+            return true;
+        }
+
         draft.item = GenerateItem(request.itemNumber);
         if (!draft.item.item_no) return false;
         draft.copies = stackable ? 1 : request.quantity;
@@ -339,7 +498,8 @@ namespace
 
 void HandleLocalAdmin(int cn, const void* payload, int length)
 {
-    if (length != sizeof(LocalAdminRequest)) return;
+    if (cn < DRAGON_CONNECTIONS_START || cn >= DRAGON_MAX_CONNECTIONS ||
+        connections[cn].state != CONNECT_JOIN || length != sizeof(LocalAdminRequest)) return;
     LocalAdminRequest request;
     memcpy(&request, payload, sizeof(request));
     if (request.version != LOCAL_ADMIN_VERSION) return;
@@ -359,13 +519,28 @@ void HandleLocalAdmin(int cn, const void* payload, int length)
         if (account[0] && _stricmp(account, connections[cn].id) == 0)
             authorized = true;
     }
-    authorized = authorized && GetPrivateProfileIntA("local_admin", "enabled", 0, ".\\MapServer.ini");
-    const bool mutation = request.operation != LA_READ && request.operation != LA_PREVIEW;
+    const bool eventOperator = !authorized &&
+        GetPrivateProfileIntA("event_operators", connections[cn].id, 0, "..\\family-gm.ini") == 1;
+    authorized = (authorized || eventOperator) && GetPrivateProfileIntA("local_admin", "enabled", 0, ".\\MapServer.ini");
+    const bool mutation = request.operation != LA_READ && request.operation != LA_PREVIEW &&
+        request.operation != LA_SESSION && request.operation != LA_TELEPORT &&
+        request.operation != LA_ANNOUNCE && request.operation != LA_GATHER &&
+        request.operation != LA_SUMMON && request.operation != LA_SUMMON_LIST &&
+        request.operation != LA_SUMMON_REMOVE && request.operation != LA_MAP_SEARCH;
     LP_SERVER_DATA database = g_pServerTable->GetOwnDBDemonData();
+    if (authorized) tacticSaves.erase(cn);
     bool changed = false;
-    if (!authorized)
+    request.target[sizeof(request.target) - 1] = 0;
+    request.announcement[sizeof(request.announcement) - 1] = 0;
+    const bool eventOperation = request.operation == LA_READ || request.operation == LA_SESSION ||
+        request.operation == LA_SESSION_ALL || request.operation == LA_ANNOUNCE || request.operation == LA_ANNOUNCE_ALL ||
+        request.operation == LA_MAP_SEARCH || request.operation == LA_TELEPORT || request.operation == LA_GATHER ||
+        request.operation == LA_SUMMON || request.operation == LA_SUMMON_LIST || request.operation == LA_SUMMON_REMOVE;
+    if (!authorized || (eventOperator && !eventOperation))
         strcpy_s(reply.message, "Conta sem acesso ao painel GM local.");
-    else if (mutation && (!database || !database->dwConnectionIndex || !CanSaveUserData(ch, 4)))
+    else if (mutation && request.operation != LA_INSPECT && request.operation != LA_LEGEND_CATALOG &&
+        request.operation != LA_RECOVER && request.operation != LA_TRAINING && request.operation != LA_TRAINING_STATS &&
+        request.operation != LA_SESSION_ALL && request.operation != LA_ANNOUNCE_ALL && request.operation != LA_AUDIT && (!database || !database->dwConnectionIndex || !CanSaveUserData(ch, 4)))
         strcpy_s(reply.message, "Personagem ou banco ainda indisponivel para salvar. Tente novamente.");
     else switch (request.operation)
     {
@@ -374,8 +549,378 @@ void HandleLocalAdmin(int cn, const void* payload, int length)
         reply.success = 1;
         strcpy_s(reply.message, "Dados recebidos do servidor.");
         break;
+    case LA_INSPECT:
+        {
+            CHARLIST* target = request.target[0] ? CheckServerName(request.target) : ch;
+            if (!target || connections[target->GetServerID()].state != CONNECT_JOIN)
+            {
+                strcpy_s(reply.message, "Personagem nao encontrado no mapa atual.");
+                break;
+            }
+            AppendDetails(reply, "%s | Nivel %d | Estado %u | HP %d/%d | MP %d/%d\r\n",
+                target->Name, target->GetLevel(), unsigned(target->GetState()), target->Hp, target->HpMax, target->Mana, target->ManaMax);
+            AppendDetails(reply, "Veneno: %u por ciclo | Amplificacao magica: %d | Defesa fisica C/M/L: %d/%d/%d\r\n",
+                unsigned(target->GetPoisonedPoint()), target->GetMagicAmplify(),
+                target->GetShortDefense(), target->GetMiddleDefense(), target->GetLongDefense());
+            const int kinds[] = { STR, DEX, CON, WIS, INT_, CHA, MOVP, ENDU, MOR, LUCK, WSPS };
+            const char* labels[] = { "STR", "DEX", "CON", "WIS", "INT", "CHA", "MOVP", "ENDU", "MOR", "LUCK", "WSPS" };
+            for (int i = 0; i < LOCAL_ADMIN_ATTRIBUTE_COUNT; ++i)
+                AppendDetails(reply, "%s %d  ", labels[i], target->GetAbility(kinds[i]));
+            AppendDetails(reply, "\r\nTaticas (ID: nivel / XP / etapa)\r\n");
+            for (int i = 0; i < NO_TAC; ++i)
+                AppendDetails(reply, "%d: %u / %lu / %d%s", TACTICS_Crapple + i, unsigned(target->Skill[TACTICS_Crapple + i]),
+                    target->tac_skillEXP[i], target->GetTacticsStep(i), i % 3 == 2 ? "\r\n" : "   ");
+            AppendDetails(reply, "\r\nEquipamento (espaco: ID e nome)\r\n");
+            for (size_t i = 0; i < sizeof(target->equip) / sizeof(target->equip[0]); ++i)
+            {
+                const int item = target->equip[i].item_no;
+                CItem* definition = item ? ItemUnit(item) : NULL;
+                if (definition) AppendDetails(reply, "%u: %d %.64s\r\n", unsigned(i), item, definition->GetHanName());
+            }
+            reply.success = 1;
+            strcpy_s(reply.message, "Inspecao do personagem recebida.");
+        }
+        break;
+    case LA_LEGEND_CATALOG:
+        {
+            const int type = request.itemNumber / 1000, number = request.itemNumber % 1000;
+            CItem* item = type >= 0 && type <= 10 && number > 0 && number < MAX_ITEM_NUM ? ItemUnit(request.itemNumber) : NULL;
+            if (!item || !item->GetLegendAble() || RareEM.GetLegendVariantCount(item->GetLegendGroup()) <= 0)
+            {
+                strcpy_s(reply.message, "Item sem grupo Legend valido.");
+                break;
+            }
+            const int group = item->GetLegendGroup();
+            AppendDetails(reply, "%.64s | Grupo %d\r\nVariantes disponiveis (efeito e valor base nos graus 3 a 8)\r\n", item->GetHanName(), group);
+            for (int v = 1; v < MAX_ITEM_LEGEND_SUB && v <= RareEM.GetLegendVariantCount(group); ++v)
+            {
+                const int effect = RareEM.GetLegendBasicRareKind(group, v, item->GetWearAble());
+                if (effect <= 0 || effect >= MAX_ITEM_RARE) continue;
+                AppendDetails(reply, "%d: %.50s (%d)", v, ItemRare[effect].LocalName, effect);
+                for (int grade = 3; grade <= 8; ++grade)
+                    AppendDetails(reply, " %d", ItemRare[effect].GRADE[grade]);
+                AppendDetails(reply, "\r\n");
+            }
+            AppendDetails(reply, "Equipamento atual com o mesmo tipo de encaixe:\r\n");
+            for (size_t i = 0; i < sizeof(ch->equip) / sizeof(ch->equip[0]); ++i)
+            {
+                const ItemAttr& equipped = ch->equip[i];
+                CItem* current = equipped.item_no ? ItemUnit(equipped.item_no) : NULL;
+                if (!current || current->GetWearAble() != item->GetWearAble()) continue;
+                RareMain rare = {};
+                memcpy(&rare, &equipped.attr[IATTR_RARE_MAIN], sizeof(rare));
+                const unsigned effect = rare.soksung1, grade = rare.grade;
+                const int bonus = !rare.IsDynamicRare && effect > 0 && effect < MAX_ITEM_RARE &&
+                    grade > 0 && grade < sizeof(ItemRare[0].GRADE) / sizeof(ItemRare[0].GRADE[0]) ? ItemRare[effect].GRADE[grade] : 0;
+                AppendDetails(reply, "%.50s | Grau %u | Efeito %u | Valor base %d\r\n",
+                    current->GetHanName(), grade, effect, bonus);
+            }
+            reply.success = 1;
+            strcpy_s(reply.message, "Catalogo Legend recebido.");
+        }
+        break;
+    case LA_TRAINING_STATS:
+        {
+            for (int i = NPC_LIST_START; i < MAX_NPC_LIST; ++i)
+            {
+                const CHARLIST& dummy = NPCList[i];
+                if (!dummy.localAdminTraining || dummy.bAlive != ALIVE_) continue;
+                const DWORD hits = dummy.localAdminTrainingHits;
+                AppendDetails(reply, "Alvo #%lu | golpes %lu | total %llu | media %llu\r\n",
+                    dummy.localAdminSummonGroup, hits, dummy.localAdminTrainingDamage,
+                    hits ? dummy.localAdminTrainingDamage / hits : 0ULL);
+                if (!hits) continue;
+                AppendDetails(reply, "Ultimos golpes (mais antigo primeiro):");
+                for (DWORD hit = hits > 8 ? hits - 8 : 0; hit < hits; ++hit)
+                    AppendDetails(reply, " %lu", dummy.localAdminTrainingRecent[hit % 8]);
+                AppendDetails(reply, "\r\n");
+            }
+            if (!reply.details[0]) AppendDetails(reply, "Nenhum alvo ativo no mapa.");
+            reply.success = 1;
+            strcpy_s(reply.message, "Medicao de dano recebida.");
+        }
+        break;
+    case LA_RECOVER:
+        if (request.progressionIndex == 2 && ch->viewtype == VIEWTYPE_GHOST_ && !ch->IsReporter())
+        {
+            SkillMgr.CharacterToAlive(ch);
+            reply.success = 1;
+        }
+        else if (request.progressionIndex == 0 && ch->Hp > 0)
+        {
+            ch->Hp = ch->HpMax;
+            ch->Mana = ch->ManaMax;
+            ch->SendCharInfoBasic(HP, ch->Hp);
+            ch->SendCharInfoBasic(MP, ch->Mana);
+            reply.success = 1;
+        }
+        else if (request.progressionIndex == 1 && ch->Hp > 0)
+        {
+            for (int i = 1; i <= 4; ++i) ch->ClearCurse(i);
+            ch->SetPoisonedPoint();
+            ch->SetPoisonedCount();
+            SendMagicCommand(ch, SET_CUREBLIND, 0, 0);
+            SendCharacterCondition(ch, 0);
+            reply.success = 1;
+        }
+        strcpy_s(reply.message, reply.success ? "Recuperacao aplicada." : "Recuperacao indisponivel no estado atual.");
+        break;
+    case LA_SESSION_ALL:
+        {
+            AppendMapRoster(reply);
+            LP_SERVER_DATA own = g_pServerTable->GetOwnServerData();
+            if (own)
+            {
+                LocalAdminMapRoster roster = {};
+                roster.originPort = own->wPort;
+                roster.ticket = ++nextRosterTicket;
+                if (!roster.ticket) roster.ticket = ++nextRosterTicket;
+                const RosterRequest query = { roster.ticket, connections[cn].dwIDForAgent,
+                    request.requestId, GetTickCount() };
+                rosterRequests[cn] = query;
+                for (LP_SERVER_DATA map = g_pServerTable->GetServerListHead(); map; map = map->pNextServerData)
+                    if (map->wPort != own->wPort && map->dwServerType == SERVER_TYPE_MAP && map->dwConnectionIndex)
+                        SendRoster(map->wPort, roster);
+            }
+            reply.success = 1;
+            strcpy_s(reply.message, "Mapa atual recebido. Outros mapas aparecem conforme responderem.");
+        }
+        break;
+    case LA_ANNOUNCE_ALL:
+        if (request.announcement[0])
+        {
+            t_packet notice = {};
+            notice.h.header.type = CMD_LOCAL_ADMIN_MAP_NOTICE;
+            notice.h.header.size = sizeof(request.announcement);
+            memcpy(&notice.u, request.announcement, sizeof(request.announcement));
+            HandleLocalAdminMapNotice(request.announcement, sizeof(request.announcement));
+            for (LP_SERVER_DATA map = g_pServerTable->GetServerListHead(); map; map = map->pNextServerData)
+            {
+                if (map == g_pServerTable->GetOwnServerData() || map->dwServerType != SERVER_TYPE_MAP || !map->dwConnectionIndex) continue;
+                g_pServerTable->SendRajaPacketToOtherMapServer(map->wPort, reinterpret_cast<char*>(&notice),
+                    notice.h.header.size + sizeof(t_header));
+            }
+            reply.success = 1;
+            strcpy_s(reply.message, "Aviso enviado aos mapas conectados.");
+        }
+        break;
+    case LA_AUDIT:
+        {
+            FILE* file = fopen(auditPath, "r");
+            if (file)
+            {
+                char line[256];
+                std::deque<std::string> last;
+                while (fgets(line, sizeof(line), file))
+                {
+                    last.push_back(line);
+                    if (last.size() > 16) last.pop_front();
+                }
+                fclose(file);
+                for (auto it = last.rbegin(); it != last.rend(); ++it)
+                {
+                    std::string entry = *it;
+                    if (!entry.empty() && entry.back() == '\n') entry.pop_back();
+                    AppendDetails(reply, "%s\r\n", entry.c_str());
+                }
+            }
+            reply.success = 1;
+            if (!reply.details[0]) AppendDetails(reply, "Nenhum registro neste mapa.");
+            strcpy_s(reply.message, "Historico persistente deste mapa.");
+        }
+        break;
+    case LA_MAP_SEARCH:
+        {
+            request.state.map[sizeof(request.state.map) - 1] = 0;
+            CharUpperA(request.state.map);
+            size_t used = 0;
+            for (int i = 0; i < MAX_MAP_; ++i)
+            {
+                if (!MapInfo[i].mapfile[0] || !MapInfo[i].port) continue;
+                char code[sizeof(MapInfo[i].mapfile)];
+                char name[sizeof(MapInfo[i].mapname)];
+                strcpy_s(code, MapInfo[i].mapfile);
+                strcpy_s(name, MapInfo[i].mapname);
+                CharUpperA(code);
+                CharUpperA(name);
+                if (!strstr(code, request.state.map) && !strstr(name, request.state.map)) continue;
+                const size_t width = strlen(code);
+                if (used + width + 3 >= sizeof(reply.message)) break;
+                if (used) { memcpy(reply.message + used, ", ", 2); used += 2; }
+                memcpy(reply.message + used, code, width);
+                used += width;
+            }
+            if (!used) strcpy_s(reply.message, "Nenhum mapa encontrado.");
+            reply.success = 1;
+        }
+        break;
+    case LA_TELEPORT:
+        if (!memchr(request.state.map, 0, sizeof(request.state.map)) || !request.state.map[0])
+            strcpy_s(reply.message, "Informe o codigo do mapa.");
+        else if (_stricmp(request.state.map, MapName) != 0)
+        {
+            const t_MapInfo* destination = GetMapInfoByMapName(request.state.map);
+            const int x = destination ? destination->nSaveX : 0;
+            const int y = destination ? destination->nSaveY : 0;
+            if (destination && destination->port && x > 0 && y > 0 && x <= 32767 && y <= 32767 &&
+                MapMove(cn, destination->mapfile, x, y))
+            {
+                reply.success = 1;
+                strcpy_s(reply.message, "Transferencia solicitada ao servidor de destino.");
+            }
+            else strcpy_s(reply.message, "Mapa sem destino de entrada ou transferencia indisponivel.");
+        }
+        else
+        {
+            int x = request.state.mapX, y = request.state.mapY;
+            if (x < 1 || x >= g_Map.file.wWidth - 1 || y < 1 || y >= g_Map.file.wHeight - 1 ||
+                !IsMovable(x, y))
+                strcpy_s(reply.message, "Escolha uma posicao transitavel no mapa atual.");
+            else
+            {
+                QuestTeleport(cn, x, y);
+                reply.success = 1;
+                strcpy_s(reply.message, "Teleporte aplicado.");
+            }
+        }
+        break;
+    case LA_SESSION:
+    case LA_ANNOUNCE:
+    case LA_GATHER:
+        {
+            request.announcement[sizeof(request.announcement) - 1] = 0;
+            if (request.operation == LA_ANNOUNCE && !request.announcement[0])
+            {
+                strcpy_s(reply.message, "Digite o aviso antes de enviar.");
+                break;
+            }
+            int x = ch->X / TILE_SIZE, y = ch->Y / TILE_SIZE;
+            if (request.operation == LA_GATHER &&
+                (x < 1 || x >= g_Map.file.wWidth - 1 || y < 1 || y >= g_Map.file.wHeight - 1 || !IsMovable(x, y)))
+            {
+                strcpy_s(reply.message, "Va para uma posicao transitavel antes de reunir jogadores.");
+                break;
+            }
+            int count = 0;
+            size_t used = 0;
+            for (int player = DRAGON_CONNECTIONS_START; player < DRAGON_MAX_CONNECTIONS; ++player)
+            {
+                if (connections[player].state != CONNECT_JOIN) continue;
+                CHARLIST* target = CheckServerId(player);
+                if (!target) continue;
+                if (request.operation == LA_ANNOUNCE) SendBBS2(request.announcement, static_cast<short>(player));
+                if (request.operation == LA_GATHER && player != cn) QuestTeleport(player, x, y);
+                if (request.operation == LA_SESSION)
+                {
+                    const size_t nameLength = strlen(target->Name);
+                    if (used + nameLength + 3 < sizeof(reply.message))
+                    {
+                        if (used) { memcpy(reply.message + used, ", ", 2); used += 2; }
+                        memcpy(reply.message + used, target->Name, nameLength);
+                        used += nameLength;
+                    }
+                }
+                if (request.operation != LA_GATHER || player != cn) ++count;
+            }
+            if (request.operation == LA_SESSION)
+                sprintf_s(reply.message + used, sizeof(reply.message) - used, " (%d no mapa)", count);
+            else
+                sprintf_s(reply.message, "%d jogadores no mapa receberam a operacao.", count);
+            reply.success = 1;
+        }
+        break;
+    case LA_SUMMON_LIST:
+        {
+            std::map<DWORD, int> groups;
+            for (int i = NPC_LIST_START; i < MAX_NPC_LIST; ++i)
+                if (NPCList[i].localAdminSummonGroup && NPCList[i].bAlive == ALIVE_)
+                    ++groups[NPCList[i].localAdminSummonGroup];
+            size_t used = sprintf_s(reply.message, "Grupos ativos: %u. ", static_cast<unsigned>(groups.size()));
+            for (const auto& group : groups)
+            {
+                char entry[32];
+                const int length = sprintf_s(entry, "#%lu (%d) ", group.first, group.second);
+                if (used + length >= sizeof(reply.message)) break;
+                memcpy(reply.message + used, entry, length + 1);
+                used += length;
+            }
+            reply.success = 1;
+        }
+        break;
+    case LA_SUMMON_REMOVE:
+        {
+            const bool event = request.progressionIndex == 3;
+            const DWORD playerId = connections[cn].dwIDForAgent;
+            const auto active = eventGroups.find(playerId);
+            if (event && active != eventGroups.end() && active->second != request.previewToken)
+            {
+                strcpy_s(reply.message, "O grupo informado nao corresponde ao seu evento ativo.");
+                break;
+            }
+            if (event && active == eventGroups.end())
+            {
+                reply.success = 1;
+                strcpy_s(reply.message, "Nenhum evento ativo neste servidor.");
+                break;
+            }
+            int removed = 0;
+            for (int i = NPC_LIST_START; i < MAX_NPC_LIST; ++i)
+            {
+                if (!request.previewToken || NPCList[i].localAdminSummonGroup != request.previewToken ||
+                    NPCList[i].bAlive != ALIVE_) continue;
+                DeleteNpc(i);
+                ++removed;
+            }
+            if (event) eventGroups.erase(active);
+            reply.success = event || removed > 0;
+            sprintf_s(reply.message, "Grupo #%lu: %d monstros removidos.", static_cast<unsigned long>(request.previewToken), removed);
+        }
+        break;
+    case LA_PRESET:
+        {
+            DWORD experiences[NO_TAC] = {};
+            bool valid = ValidAttributes(request.state) &&
+                memchr(request.state.character, 0, sizeof(request.state.character)) &&
+                strcmp(request.state.character, ch->Name) == 0 &&
+                request.state.baseClass == ch->Class &&
+                request.state.dualClass == ch->GetDualClass() &&
+                request.state.dualStep == ch->GetClassStep();
+            int combat = ch->GetCombatPoint();
+            for (int i = 0; i < 36; ++i) combat += ch->GetCombatLevel(LIGHTNING_BOOM + i);
+            if (valid && combat > NPC_Lev_Ref[request.state.level].nCspMax) valid = false;
+            for (int i = 0; valid && i < NO_TAC; ++i)
+            {
+                const int level = request.state.skills[TACTICS_Crapple + i];
+                valid = GetTacticStartingExperience(level, experiences[i]);
+                if (valid && request.state.tacticStep[i] == NPC_Lev_Ref[level].nStep &&
+                    request.state.tacticExp[i] >= experiences[i] &&
+                    request.state.tacticExp[i] <= static_cast<DWORD>(NPC_Lev_Ref[level].nMaxExp))
+                    experiences[i] = request.state.tacticExp[i];
+            }
+            for (int i = 0; valid && i < 200; ++i)
+                valid = request.state.wizard[i] <= 1 && request.state.priest[i] <= 1;
+            if (!valid)
+            {
+                strcpy_s(reply.message, "Preset incompativel com personagem, classe, etapa ou tabela de progressao.");
+                break;
+            }
+            ApplyAttributes(ch, request.state);
+            for (int i = 0; i < NO_TAC; ++i)
+                SetTactic(ch, i, request.state.skills[TACTICS_Crapple + i], experiences[i]);
+            memcpy(ch->Ws, request.state.wizard, sizeof(request.state.wizard));
+            memcpy(ch->Ps, request.state.priest, sizeof(request.state.priest));
+            reply.success = 1;
+            changed = true;
+        }
+        break;
+    case LA_TRAINING:
     case LA_SUMMON:
-        if (request.itemNumber < 0 || request.itemNumber >= Num_Of_NPC_Generation ||
+        if ((request.progressionIndex == 1 || request.progressionIndex == 3) &&
+            (!memchr(request.state.map, 0, sizeof(request.state.map)) ||
+             !memchr(request.state.character, 0, sizeof(request.state.character)) ||
+             _stricmp(request.state.map, MapName) || strcmp(request.state.character, ch->Name)))
+            strcpy_s(reply.message, "Ondas interrompidas: personagem ou mapa mudou.");
+        else if (request.itemNumber < 0 || request.itemNumber >= Num_Of_NPC_Generation ||
             !NPC_Gen_Ref[request.itemNumber].Name[0] || NPC_Gen_Ref[request.itemNumber].nHpMax <= 0 ||
             NPC_Gen_Ref[request.itemNumber].SprNO <= 0 || request.quantity < 1 || request.quantity > 20)
             strcpy_s(reply.message, "Selecione um monstro valido e quantidade de 1 a 20.");
@@ -383,21 +928,53 @@ void HandleLocalAdmin(int cn, const void* payload, int length)
             strcpy_s(reply.message, "Aguarde 3 segundos entre invocacoes.");
         else {
             summonTimes[cn] = GetTickCount();
+            const bool training = request.operation == LA_TRAINING;
+            const bool event = request.progressionIndex == 3 && !training;
+            const DWORD playerId = connections[cn].dwIDForAgent;
+            DWORD group = event && request.summonGroup && eventGroups.count(playerId) &&
+                eventGroups[playerId] == request.summonGroup ? request.summonGroup : 0;
+            const bool newGroup = !group;
+            if (!group) group = ++nextSummonGroup;
+            if (!group) group = ++nextSummonGroup;
+            int centerX = event ? request.state.mapX : ch->X / TILE_SIZE;
+            int centerY = event ? request.state.mapY : ch->Y / TILE_SIZE;
+            if (centerX < 1 || centerY < 1 || centerX >= g_Map.file.wWidth - 1 ||
+                centerY >= g_Map.file.wHeight - 1 || !IsMovable(centerX, centerY))
+            {
+                strcpy_s(reply.message, "Ponto de invocacao invalido.");
+                break;
+            }
+            const int quantity = training ? 1 : request.quantity;
             int created = 0, upgraded = 0;
-            for (int attempt = 0; attempt < 100 && created < request.quantity; ++attempt) {
-                int x = ch->X / TILE_SIZE + (attempt % 9) - 4;
-                int y = ch->Y / TILE_SIZE + ((attempt / 9) % 9) - 4;
+            for (int attempt = 0; attempt < 81 && created < quantity; ++attempt) {
+                int x = centerX + (attempt % 9) - 4;
+                int y = centerY + (attempt / 9) - 4;
                 if (x < 1 || y < 1 || x >= g_Map.file.wWidth - 1 || y >= g_Map.file.wHeight - 1) continue;
                 if (!IsMovable(x, y)) continue;
                 const int slot = GetAliveNPCList();
                 if (slot < 0) break;
                 if (NPC_Create(slot, request.itemNumber, x, y, -1, 0, 9)) {
+                    NPCList[slot].localAdminSummonGroup = group;
                     ++created;
-                    upgraded += MaximizeSummonDropRarity(&NPCList[slot]);
+                    if (training)
+                    {
+                        NPCList[slot].localAdminTraining = true;
+                        NPCList[slot].ChairNum = 0;
+                        NPCList[slot].tamingable = 0;
+                        memset(NPCList[slot].inv, 0, sizeof(NPCList[slot].inv));
+                    }
+                    else upgraded += MaximizeSummonDropRarity(&NPCList[slot]);
                 }
             }
             reply.success = created > 0;
-            sprintf_s(reply.message, "%d de %d invocados. Loot normal da especie; raridade maxima nos equipamentos compativeis (%d convertidos). Sem respawn.", created, request.quantity, upgraded);
+            reply.summonGroup = created ? group : 0;
+            if (created && event)
+            {
+                eventGroups[playerId] = group;
+                if (newGroup && request.announcement[0])
+                    HandleLocalAdminMapNotice(request.announcement, sizeof(request.announcement));
+            }
+            sprintf_s(reply.message, "Grupo #%lu: %d de %d invocados. Equipamentos convertidos em raros: %d. Sem respawn.", group, created, request.quantity, upgraded);
             MyLog(LOG_NORMAL, "LOCAL GM summon character=%s monster=%d requested=%d created=%d", ch->Name, request.itemNumber, request.quantity, created);
         }
         break;
@@ -439,16 +1016,44 @@ void HandleLocalAdmin(int cn, const void* payload, int length)
             reply.success = 1; changed = true;
         }
         break;
+    case LA_UNDO_TACTIC:
+        {
+            auto previous = tacticUndo.find(cn);
+            if (previous == tacticUndo.end() || previous->second.character != ch->Name ||
+                previous->second.playerId != connections[cn].dwIDForAgent)
+            {
+                strcpy_s(reply.message, "Nenhuma edicao de tatica para desfazer nesta sessao.");
+                break;
+            }
+            const TacticUndo& edit = previous->second;
+            if (ch->GetTacticsStep(edit.index) != edit.newStep || ch->tac_skillEXP[edit.index] != edit.newExperience)
+            {
+                strcpy_s(reply.message, "A tatica mudou desde a edicao. Atualize o painel.");
+                break;
+            }
+            ch->SetTacticsStep(edit.index, edit.oldStep);
+            ch->tac_skillEXP[edit.index] = edit.oldExperience;
+            ch->ConvertTacticsLevel(edit.index);
+            ch->SendCharInfoTactic(edit.index);
+            tacticUndo.erase(previous);
+            reply.success = 1;
+            changed = true;
+        }
+        break;
     case LA_PROGRESSION:
         {
             const int kind = request.progressionKind, index = request.progressionIndex;
             const int level = request.progressionLevel;
-            if (kind == 0 && index >= 0 && index < 13 && level >= 0 && level <= MAX_TAC_LEVEL) {
-                ch->Skill[88 + index] = static_cast<BYTE>(level);
-                ch->SetTacticsStep(index, NPC_Lev_Ref[level].nStep);
-                ch->tac_skillEXP[index] = NPC_Lev_Ref[level].nMinExp;
-                ch->SendCharInfoTactic(index);
-                reply.success = 1;
+            if (kind == 0 && index >= 0 && index < NO_TAC) {
+                DWORD experience = 0;
+                if (GetTacticStartingExperience(level, experience)) {
+                    TacticUndo edit = { ch->Name, connections[cn].dwIDForAgent, index, ch->GetTacticsStep(index),
+                        NPC_Lev_Ref[level].nStep, ch->tac_skillEXP[index], experience };
+                    SetTactic(ch, index, level, experience);
+                    tacticUndo[cn] = edit;
+                    reply.success = 1;
+                }
+                else strcpy_s(reply.message, "Nivel de tatica sem faixa de experiencia valida na tabela do servidor.");
             }
             else if (kind == 1 && index >= 0 && index <= 112 && !(index >= 88 && index <= 100) &&
                 level >= 0 && level <= 1) {
@@ -477,7 +1082,7 @@ void HandleLocalAdmin(int cn, const void* payload, int length)
                 reply.success = 1;
             }
             if (reply.success) { ResetAbility(ch); changed = true; }
-            else strcpy_s(reply.message, "Valor invalido. Taticas: limite do servidor; profissoes: 0-100; skills: 0-1; combate: 0-3.");
+            else if (!reply.message[0]) strcpy_s(reply.message, "Valor invalido. Taticas: 1 ate o limite do servidor; profissoes: 0-100; skills: 0-1; combate: 0-3.");
         }
         break;
     case LA_ATTRIBUTES:
@@ -602,7 +1207,7 @@ void HandleLocalAdmin(int cn, const void* payload, int length)
     if (changed)
     {
         updateCharacterStatusToLoginServer(connections, cn);
-        if (request.operation == LA_DUAL || request.operation == LA_SYMBOL || request.operation == LA_PROGRESSION)
+        if (request.operation == LA_DUAL || request.operation == LA_SYMBOL || request.operation == LA_PROGRESSION || request.operation == LA_PRESET || request.operation == LA_UNDO_TACTIC)
             updateBinaryDataToLoaginServer(connections, cn);
         if (request.operation == LA_CREATE || request.operation == LA_GOLD || request.operation == LA_EMBLEMS)
         {
@@ -618,13 +1223,101 @@ void HandleLocalAdmin(int cn, const void* payload, int length)
         MyLog(LOG_NORMAL, "LOCAL GM account=%s character=%s operation=%u request=%u", account, ch->Name, request.operation, request.requestId);
         if (!reply.message[0]) strcpy_s(reply.message, "Aplicado no servidor. Salvamento enviado ao DBDemon.");
     }
+    if (authorized && (!eventOperator || eventOperation) && (changed || request.operation == LA_SUMMON || request.operation == LA_SUMMON_REMOVE ||
+        request.operation == LA_ANNOUNCE || request.operation == LA_ANNOUNCE_ALL || request.operation == LA_RECOVER || request.operation == LA_TRAINING))
+        Audit(cn, request, reply);
     if (!reply.message[0]) strcpy_s(reply.message, "Operacao nao aplicada.");
-    t_packet packet = {};
-    packet.h.header.type = CMD_LOCAL_ADMIN;
-    packet.h.header.size = sizeof(reply);
-    memcpy(&packet.u, &reply, sizeof(reply));
-    QueuePacket(connections, cn, &packet, 1);
+    const bool verifyTactics = changed && (request.operation == LA_PRESET || request.operation == LA_UNDO_TACTIC ||
+        (request.operation == LA_PROGRESSION && request.progressionKind == 0));
+    if (verifyTactics)
+    {
+        LocalAdminTacticVerification verification = {};
+        verification.connection = cn;
+        verification.requestId = reply.requestId;
+        strcpy_s(verification.character, reply.state.character);
+        memcpy(verification.experience, reply.state.tacticExp, sizeof(verification.experience));
+        memcpy(verification.step, reply.state.tacticStep, sizeof(verification.step));
+        const TacticSave pending = { connections[cn].dwIDForAgent, reply };
+        tacticSaves[cn] = pending;
+        t_packet packet = {};
+        packet.h.header.type = CMD_LOCAL_ADMIN_VERIFY_TACTICS;
+        packet.h.header.size = sizeof(verification);
+        memcpy(&packet.u, &verification, sizeof(verification));
+        QueuePacket(connections, DB_DEMON, &packet, 1);
+        return;
+    }
+    SendAdminReply(cn, reply);
     if (authorized && request.operation == LA_READ && reply.success)
         SendEffectCatalog(cn, request.requestId);
 }
 
+
+void HandleLocalAdminVerification(const void* payload, int length)
+{
+    if (length != sizeof(LocalAdminTacticVerification)) return;
+    LocalAdminTacticVerification verification;
+    memcpy(&verification, payload, sizeof(verification));
+    auto pending = tacticSaves.find(verification.connection);
+    if (pending == tacticSaves.end() || pending->second.reply.requestId != verification.requestId ||
+        memcmp(pending->second.reply.state.character, verification.character, sizeof(verification.character))) return;
+
+    const DWORD playerId = pending->second.playerId;
+    LocalAdminReply reply = pending->second.reply;
+    tacticSaves.erase(pending);
+    CHARLIST* ch = CheckServerId(verification.connection);
+    if (!ch || connections[verification.connection].state != CONNECT_JOIN ||
+        connections[verification.connection].dwIDForAgent != playerId || strcmp(ch->Name, reply.state.character)) return;
+    ReadState(ch, reply.state);
+    if (verification.verified == 1)
+        strcpy_s(reply.message, "Aplicado. XP e etapas das taticas confirmados no banco.");
+    else
+        strcpy_s(reply.message, "Aplicado em memoria. O banco nao confirmou XP e etapas das taticas.");
+    SendAdminReply(verification.connection, reply);
+}
+
+void HandleLocalAdminMapNotice(const void* payload, int length)
+{
+    char message[120];
+    if (length != sizeof(message)) return;
+    memcpy(message, payload, sizeof(message));
+    message[sizeof(message) - 1] = 0;
+    for (int player = DRAGON_CONNECTIONS_START; player < DRAGON_MAX_CONNECTIONS; ++player)
+        if (connections[player].state == CONNECT_JOIN && CheckServerId(player))
+            SendBBS2(message, static_cast<short>(player));
+}
+
+void HandleLocalAdminMapRoster(const void* payload, int length)
+{
+    if (length != sizeof(LocalAdminMapRoster)) return;
+    LocalAdminMapRoster roster;
+    memcpy(&roster, payload, sizeof(roster));
+    if (!roster.ticket || !roster.originPort) return;
+    if (!roster.response)
+    {
+        LP_SERVER_DATA source = g_pServerTable->GetConnectedServerData(roster.originPort);
+        if (!source || source->dwServerType != SERVER_TYPE_MAP) return;
+        LocalAdminReply reply = {};
+        AppendMapRoster(reply);
+        strncpy_s(roster.details, reply.details, _TRUNCATE);
+        roster.response = 1;
+        SendRoster(roster.originPort, roster);
+        return;
+    }
+    roster.details[sizeof(roster.details) - 1] = 0;
+    for (const auto& entry : rosterRequests)
+    {
+        const int player = entry.first;
+        const RosterRequest& query = entry.second;
+        if (query.ticket != roster.ticket || GetTickCount() - query.started > 10000 ||
+            connections[player].dwIDForAgent != query.playerId || connections[player].state != CONNECT_JOIN)
+            continue;
+        LocalAdminReply reply = {};
+        reply.version = LOCAL_ADMIN_VERSION;
+        reply.operation = LA_SESSION_ALL;
+        reply.requestId = query.requestId;
+        reply.previewToken = 1;
+        strcpy_s(reply.details, roster.details);
+        SendAdminReply(player, reply);
+        return;
+    }
+}

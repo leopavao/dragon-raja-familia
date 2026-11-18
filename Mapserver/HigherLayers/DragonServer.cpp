@@ -537,7 +537,22 @@ int HandleCommand( int cn, t_packet *packet)
 	}		
 	
 	if (packet->h.header.type == CMD_LOCAL_ADMIN) { HandleLocalAdmin(cn, &packet->u, packet->h.header.size); return 1; }
-switch (packet->h.header.type)
+    if (packet->h.header.type == CMD_LOCAL_ADMIN_MAP_ROSTER)
+    {
+        if (cn == CN_FROM_OTHER_MAPSERVER_MSG) HandleLocalAdminMapRoster(&packet->u, packet->h.header.size);
+        return 1;
+    }
+    if (packet->h.header.type == CMD_LOCAL_ADMIN_MAP_NOTICE)
+    {
+        if (cn == CN_FROM_OTHER_MAPSERVER_MSG) HandleLocalAdminMapNotice(&packet->u, packet->h.header.size);
+        return 1;
+    }
+    if (packet->h.header.type == CMD_LOCAL_ADMIN_VERIFY_TACTICS)
+    {
+        if (cn == DB_DEMON) HandleLocalAdminVerification(&packet->u, packet->h.header.size);
+        return 1;
+    }
+    switch (packet->h.header.type)
 	{
 	case CMD_NONE:
 		{

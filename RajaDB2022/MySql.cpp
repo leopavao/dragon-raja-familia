@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "../Shared/LocalAdminProtocol.h"
 
 #include "MAIN.H"
 #include "NPC_Pattern.h"
@@ -3000,6 +3001,40 @@ int RecvUpdateTacticSkillExpData( t_update_very_important_tactics *p )
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+bool VerifyLocalAdminTactics(const LocalAdminTacticVerification& verification)
+{
+    if (!memchr(verification.character, 0, sizeof(verification.character))) return false;
+    SQLHSTMT statement = SQL_NULL_HSTMT;
+    if (!SQL_SUCCEEDED(SQLAllocStmt(hDBC, &statement))) return false;
+
+    char name[sizeof(verification.character)];
+    memcpy(name, verification.character, sizeof(name));
+    SQLLEN nameLength = SQL_NTS;
+    UCHAR query[] = "SELECT tac_skillEXP, guildname FROM chr_info WHERE name=?";
+    SQLRETURN result = SQLPrepare(statement, query, SQL_NTS);
+    if (SQL_SUCCEEDED(result))
+        result = SQLBindParameter(statement, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR,
+            sizeof(name) - 1, 0, name, sizeof(name), &nameLength);
+    if (SQL_SUCCEEDED(result)) result = SQLExecute(statement);
+    if (SQL_SUCCEEDED(result)) result = SQLFetch(statement);
+
+    DWORD experience[13] = {};
+    char steps[20] = {};
+    SQLLEN experienceLength = 0, stepLength = 0;
+    if (SQL_SUCCEEDED(result))
+        result = SQLGetData(statement, 1, SQL_C_BINARY, experience, sizeof(experience), &experienceLength);
+    if (SQL_SUCCEEDED(result))
+        result = SQLGetData(statement, 2, SQL_C_CHAR, steps, sizeof(steps), &stepLength);
+    SQLFreeStmt(statement, SQL_DROP);
+    if (!SQL_SUCCEEDED(result) || experienceLength != sizeof(experience) || stepLength < MAX_STEP)
+        return false;
+
+    ConvertLoad(steps);
+    return memcmp(experience, verification.experience, sizeof(experience)) == 0 &&
+        memcmp(steps + T01_STEP, verification.step, sizeof(verification.step)) == 0;
+}
+
 int RecvUpdateBinaryData( t_server_update_binary_data0 *p )
 {	
 
@@ -3013,83 +3048,35 @@ int RecvUpdateBinaryData( t_server_update_binary_data0 *p )
 		MyLog( 0, "error crc check... update 't_server_update_binary_data0' : %s", szName  );
 		return 0;
 	}
-	// -------------------
-	SQLINTEGER  cbdata = 200, cbvalue = SQL_DATA_AT_EXEC ;
-	SQLINTEGER	cbwslen, cbpslen, cbskilllen, cbskillexplen,cbtacskillexplen;
-	SQLRETURN	retcode;
-	SQLHSTMT	hstmt;
-	SQLPOINTER	pParamData;
-	int			n=0;
-	char		aaa=20;
-	char		query[256]={0,};
-	
-	sprintf(query, "UPDATE chr_info SET ws=?, ps=?,skill=?, skill_exp=?, tac_skillEXP=? WHERE name='%s'", szName) ;
-	
-	//printf("\nSQL: %s", query) ;
-	SQLAllocStmt(hDBC, &hstmt);
-	retcode = SQLPrepare(hstmt, (UCHAR *)query, SQL_NTS);
-	if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
-		
-		retcode= SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_BINARY,SQL_LONGVARBINARY, SIZE_OF_WS,			0, p->Ws,			0, &cbwslen); 
-		retcode= SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_BINARY,SQL_LONGVARBINARY, SIZE_OF_PS,			0, p->Ps,			0, &cbpslen); 
-		retcode= SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_BINARY,SQL_LONGVARBINARY, SIZE_OF_SKILL,			0, p->Skill,		0, &cbskilllen); 
-		retcode= SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_BINARY,SQL_LONGVARBINARY, SIZE_OF_SKILL_EXP,		0, p->skillexp,	0, &cbskillexplen); 
-		retcode= SQLBindParameter(hstmt, 5, SQL_PARAM_INPUT, SQL_C_BINARY,SQL_LONGVARBINARY, SIZE_OF_TAC_SKILL_EXP,	0, p->tac_skillEXP,0, &cbtacskillexplen); 
-		
-		if(retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)
-		{
-			SQLFreeStmt(hstmt, SQL_DROP);
-			//printf("\nBinding FAIL!!!") ;
-			return -5 ;
-		}
-		
-		cbpslen			= SQL_LEN_DATA_AT_EXEC(0);
-		cbwslen			= SQL_LEN_DATA_AT_EXEC(0);
-		cbskilllen		= SQL_LEN_DATA_AT_EXEC(0);
-		cbskillexplen	= SQL_LEN_DATA_AT_EXEC(0);
-		cbtacskillexplen= SQL_LEN_DATA_AT_EXEC(0);
-		
-		retcode = SQLExecute(hstmt) ;
-		
-		while(retcode == SQL_NEED_DATA) 
-		{      
-			retcode = SQLParamData(hstmt, &pParamData) ;
-			if(retcode == SQL_NEED_DATA) 
-			{
-				if(pParamData == p->Ws) 				SQLPutData(hstmt, p->Ws, SIZE_OF_WS);
-				else if(pParamData == p->Ps) 			SQLPutData(hstmt, p->Ps, SIZE_OF_PS);      
-				else if(pParamData == p->Skill) 		SQLPutData(hstmt, p->Skill, SIZE_OF_SKILL);      
-				else if(pParamData == p->skillexp) 	SQLPutData(hstmt, p->skillexp, SIZE_OF_SKILL_EXP );      
-				else if(pParamData == p->tac_skillEXP)	SQLPutData(hstmt, p->tac_skillEXP, SIZE_OF_TAC_SKILL_EXP );      
-				
-			}
-			else break ;
-		}
-		
-		retcode = SQLExecute(hstmt) ;
-		
-		if(retcode == SQL_NEED_DATA)
-		{
-			retcode= SQLCancel(hstmt) ;
-			//			retcode= SQLTransact(SQL_NULL_HENV, hDBC, SQL_COMMIT);
-			retcode= SQLFreeStmt(hstmt, SQL_DROP );
-			
-			if(retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO) {
-				//printf("\n Transact commit Error") ;
-			}
-			//printf("\nTransact & free") ;
-			return(1); // succeed
-		}
-		else
-		{
-			displaySQLError(hstmt) ;
-			//			SQLTransact(SQL_NULL_HENV, hDBC, SQL_ROLLBACK);
-			SQLFreeStmt(hstmt, SQL_DROP);
-			return(-3); 
-		}
+	SQLHSTMT statement = SQL_NULL_HSTMT;
+	if (!SQL_SUCCEEDED(SQLAllocStmt(hDBC, &statement)))
+	{
+		return -3;
 	}
-	SQLFreeStmt(hstmt, SQL_DROP);
-	return 1;
+
+	char query[256];
+	sprintf(query, "UPDATE chr_info SET ws=?, ps=?,skill=?, skill_exp=?, tac_skillEXP=? WHERE name='%s'", szName);
+	SQLRETURN result = SQLPrepare(statement, (UCHAR *)query, SQL_NTS);
+	SQLPOINTER data[] = {p->Ws, p->Ps, p->Skill, p->skillexp, p->tac_skillEXP};
+	SQLLEN lengths[] = {SIZE_OF_WS, SIZE_OF_PS, SIZE_OF_SKILL, SIZE_OF_SKILL_EXP, SIZE_OF_TAC_SKILL_EXP};
+	for (SQLUSMALLINT i = 0; SQL_SUCCEEDED(result) && i < sizeof(data)/sizeof(data[0]); ++i)
+	{
+		result = SQLBindParameter(statement, i + 1, SQL_PARAM_INPUT, SQL_C_BINARY,
+			SQL_LONGVARBINARY, lengths[i], 0, data[i], lengths[i], &lengths[i]);
+	}
+
+	if (SQL_SUCCEEDED(result))
+	{
+		result = SQLExecute(statement);
+	}
+
+	const bool saved = SQL_SUCCEEDED(result);
+	if (!saved)
+	{
+		displaySQLError(statement);
+	}
+	SQLFreeStmt(statement, SQL_DROP);
+	return saved ? 1 : -3;
 }
 
 

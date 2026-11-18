@@ -808,7 +808,7 @@ void MovingNPC()
 	for( int i = NPC_LIST_START ; i < MAX_NPC_LIST ; i++ ) 
 	{
 		CHARLIST* npc = ::CheckNpcId(i);
-		if(!npc){continue;}
+		if(!npc || npc->localAdminTraining){continue;}
 		
 		if(	ALIVE_ != npc->bAlive	
 			||	CON_STONE == npc->GetState() )

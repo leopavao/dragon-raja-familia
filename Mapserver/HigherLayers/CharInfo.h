@@ -24,6 +24,11 @@ struct CHAR_DATA
 	BYTE			installType;
 	DWORD			total_id;
 	short			eventno;
+    DWORD localAdminSummonGroup;
+    bool localAdminTraining;
+    DWORD localAdminTrainingHits;
+    DWORD localAdminTrainingRecent[8];
+    unsigned long long localAdminTrainingDamage;
 	short			generationpos;		// NPC일경우 발생 위치 Table의 Index값을 기억하고 있는다.
 	short			generationtype;		// NPC일겅우 발생방식( GT_SKB_FILE, GT_SCRIPT );
 	char			Name[20];
@@ -768,8 +773,15 @@ inline int CCharInfo::IncLife(int nVolume, int nMax = 100)
 	return Hp - nOld;
 }
 
-inline int CCharInfo::DecLife(int nVolume, int nMin = 0) 
-{ // Life 감소
+inline int CCharInfo::DecLife(int nVolume, int nMin = 0)
+{
+    if (localAdminTraining && nVolume > 0)
+    {
+        localAdminTrainingRecent[localAdminTrainingHits % 8] = nVolume;
+        ++localAdminTrainingHits;
+        localAdminTrainingDamage += nVolume;
+        return nVolume;
+    } // Life 감소
 	const int nOld = Hp;
 	const int nLimit = HpMax*nMin/100;
 	Hp -= nVolume; 

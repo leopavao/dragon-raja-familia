@@ -312,7 +312,7 @@ int addEXP(CHARLIST *a, CHARLIST *d, int criteria, int damage )
 		return 0;
 	}
 	//> CSD-030509 
-	if (a == NULL || d == NULL)         return 0;
+	if (a == NULL || d == NULL || d->localAdminTraining)         return 0;
 	if (a->IsNpc())                     return 0;
 	if (a->IsPlayer() && d->IsPlayer()) return 0;
 			

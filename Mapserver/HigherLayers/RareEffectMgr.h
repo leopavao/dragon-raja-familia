@@ -221,6 +221,10 @@ public:
 	int		LoadItem_Legend_Table();
 	int		LoadItem_Legend_Bonus_Item();
 public:
+    int GetLegendVariantCount(int group) const
+    {
+        return group > 0 && group < MAX_ITEM_LEGEND ? m_aItemLegend[group].iGroupIndexMax : 0;
+    }
 	int		GetAbleGroupIndex(const int iGroupNo);
 	int		GetLegendBasicRareKind(const int iGroupNo,const int iGroupIndex,const int iWearAble);
 	ITEMMULTIRARE	GetIMR(const int iIndex)const

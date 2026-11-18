@@ -23,6 +23,7 @@ extern LPCHARACTER Hero;
 extern CSymbolMgr_Client g_SymBolMgr;
 extern int QueuePacket(t_packet* packet, int flag);
 static_assert(sizeof(LocalAdminCatalog) <= sizeof(((t_packet*)0)->u), "Catalog packet exceeds game payload");
+static_assert(sizeof(LocalAdminReply) <= MAX_PACKET_SIZE, "Reply exceeds client packet limit");
 static_assert(sizeof(LocalAdminRequest) <= sizeof(((t_packet*)0)->u), "Request packet exceeds game payload");
 
 namespace
@@ -39,20 +40,39 @@ namespace
         ID_APPLY_DUAL, ID_APPLY_SYMBOL, ID_DUAL_INFO,
         ID_PROGRESS_KIND = 4120, ID_PROGRESS_INDEX, ID_PROGRESS_LEVEL, ID_PROGRESS_EXP,
         ID_PROGRESS_RARE, ID_APPLY_PROGRESS, ID_PROGRESS_HINT,
-        ID_MONSTER_SEARCH = 4140, ID_MONSTER, ID_MONSTER_COUNT, ID_SUMMON
+        ID_MONSTER_SEARCH = 4140, ID_MONSTER, ID_MONSTER_COUNT, ID_SUMMON,
+        ID_LEGEND = 4150, ID_MAP_INFO, ID_MAP_X, ID_MAP_Y, ID_TELEPORT, ID_MARK, ID_RETURN,
+        ID_SESSION, ID_ANNOUNCEMENT, ID_ANNOUNCE, ID_GATHER, ID_HISTORY,
+        ID_SUMMON_LIST, ID_SUMMON_GROUP, ID_SUMMON_REMOVE, ID_WAVE_COUNT, ID_WAVE_DELAY, ID_WAVE_STOP,
+        ID_SAVE_PRESET, ID_APPLY_PRESET, ID_MAP_CODE, ID_MAP_SEARCH, ID_UNDO_TACTIC,
+        ID_ADV_TARGET, ID_INSPECT, ID_RECOVER_HP, ID_RECOVER_CURSE, ID_REVIVE, ID_TRAINING,
+        ID_TRAINING_STATS, ID_SESSION_ALL, ID_ANNOUNCE_ALL, ID_AUDIT, ID_ADV_DETAILS,
+        ID_LEGEND_VARIANT, ID_LEGEND_CATALOG, ID_EVENT_NAME, ID_EVENT_SAVE, ID_EVENT_RUN, ID_EVENT_END
     };
 
     HWND panel = NULL;
     HWND tabControl = NULL;
-    std::vector<HWND> pages[6];
+    std::vector<HWND> pages[9];
+    DWORD activeEventGroup = 0;
+    LocalAdminState activeEventLocation = {};
+    const char* eventFile = ".\\gm-events.ini";
+    LocalAdminState returnPoint = {};
+    LocalAdminState preset = {};
+    LocalAdminRequest waveRequest = {};
+    int wavesRemaining = 0;
+    DWORD waveDelay = 0;
     LocalAdminState currentState = {};
     DWORD nextRequest = 0;
     DWORD pendingRequest = 0;
+    bool markOnReply = false;
+    bool capturePreset = false;
+    bool eventReply = false;
     DWORD previewToken = 0;
     bool canUndo = false;
     bool fillingControls = false;
     bool catalogReady = false;
     DWORD catalogRequest = 0;
+    DWORD rosterRequest = 0;
     std::vector<LocalAdminEffect> effects;
     const char* attributeNames[] = { "STR", "DEX", "CON", "WIS", "INT", "CHA", "MOVP", "ENDU", "MOR", "LUCK", "WSPS" };
 
@@ -99,7 +119,7 @@ namespace
     {
         const int kind = SelectedValue(ID_PROGRESS_KIND), index = SelectedValue(ID_PROGRESS_INDEX);
         DWORD level = 0, exp = 0, rare = 0;
-        if (kind == 0 && index < 13) level = currentState.skills[88 + index];
+        if (kind == 0 && index >= 0 && index < 13) level = currentState.skills[88 + index];
         if (kind == 1 && index < 200) level = currentState.skills[index];
         if (kind == 2 && index < 45) { level = currentState.workExp[index] / 10000; exp = currentState.workExp[index] % 10000; rare = currentState.workRare[index]; }
         if (kind == 3 && index < 200) level = currentState.wizard[index];
@@ -109,7 +129,12 @@ namespace
         SetNumber(ID_PROGRESS_LEVEL, level); SetNumber(ID_PROGRESS_EXP, exp); SetNumber(ID_PROGRESS_RARE, rare);
         EnableWindow(Control(ID_PROGRESS_EXP), kind == 2 && !pendingRequest);
         EnableWindow(Control(ID_PROGRESS_RARE), kind == 2 && !pendingRequest);
-        SetWindowTextA(Control(ID_PROGRESS_HINT), kind == 0 ? "Taticas: nivel recalcula experiencia e etapa automaticamente." :
+        char tactic[130] = "Selecione uma tatica para consultar o servidor.";
+        if (kind == 0 && index >= 0 && index < 13)
+            sprintf_s(tactic, "Servidor: nivel %u | XP %lu | etapa %d. Atualize os dados para consultar novamente.",
+                static_cast<unsigned>(currentState.skills[88 + index]),
+                static_cast<unsigned long>(currentState.tacticExp[index]), int(currentState.tacticStep[index]));
+        SetWindowTextA(Control(ID_PROGRESS_HINT), kind == 0 ? tactic :
             kind == 2 ? "Profissoes: nivel 0-100; progresso 0-9999 (0 no nivel 100); rare 0-4095." :
             kind == 1 ? "Habilidades / grandmasters: 0 remove, 1 aprende." : kind == 5 ? "Habilidades de combate: nivel 0-3." : kind == 6 ? "Progressoes adicionais: 0-32767. Etapa de magia religiosa: 0-5." : "Magias: 0 remove, 1 aprende. IDs correspondem ao catalogo do jogo.");
     }
@@ -153,7 +178,9 @@ namespace
 
     void SetBusy(bool busy)
     {
-        const int buttons[] = { ID_REFRESH, ID_APPLY_STATS, ID_APPLY_GOLD, ID_APPLY_BANK, ID_APPLY_RE, ID_PREVIEW, ID_APPLY_DUAL, ID_APPLY_SYMBOL, ID_APPLY_PROGRESS, ID_SUMMON };
+        const int buttons[] = { ID_REFRESH, ID_APPLY_STATS, ID_APPLY_GOLD, ID_APPLY_BANK, ID_APPLY_RE, ID_PREVIEW, ID_APPLY_DUAL, ID_APPLY_SYMBOL, ID_APPLY_PROGRESS, ID_SUMMON, ID_TELEPORT, ID_MARK, ID_RETURN, ID_SESSION, ID_ANNOUNCE, ID_GATHER, ID_SUMMON_LIST, ID_SUMMON_REMOVE, ID_SAVE_PRESET, ID_APPLY_PRESET, ID_MAP_SEARCH, ID_UNDO_TACTIC,
+            ID_INSPECT, ID_RECOVER_HP, ID_RECOVER_CURSE, ID_REVIVE, ID_TRAINING, ID_TRAINING_STATS,
+            ID_SESSION_ALL, ID_ANNOUNCE_ALL, ID_AUDIT, ID_LEGEND_CATALOG, ID_EVENT_SAVE, ID_EVENT_RUN, ID_EVENT_END };
         for (int i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i)
             EnableWindow(Control(buttons[i]), !busy);
         EnableWindow(Control(ID_CREATE), !busy && previewToken != 0);
@@ -168,6 +195,17 @@ namespace
         EnableWindow(Control(ID_PROGRESS_RARE), !busy && SelectedValue(ID_PROGRESS_KIND) == 2);
         for (int id = ID_MONSTER_SEARCH; id <= ID_MONSTER_COUNT; ++id) EnableWindow(Control(id), !busy);
         EnableWindow(Control(ID_SUMMON), !busy && catalogReady);
+        EnableWindow(Control(ID_LEGEND), !busy);
+        EnableWindow(Control(ID_LEGEND_VARIANT), !busy && IsDlgButtonChecked(panel, ID_LEGEND) == BST_CHECKED);
+        EnableWindow(Control(ID_EVENT_END), !busy && activeEventGroup != 0);
+        EnableWindow(Control(ID_RETURN), !busy && returnPoint.map[0]);
+        EnableWindow(Control(ID_APPLY_PRESET), !busy && preset.character[0]);
+        EnableWindow(Control(ID_WAVE_STOP), wavesRemaining > 0);
+        if (IsDlgButtonChecked(panel, ID_LEGEND) == BST_CHECKED)
+        {
+            for (int id = ID_EFFECT1; id <= ID_HIGH; ++id) EnableWindow(Control(id), FALSE);
+            EnableWindow(Control(ID_GRADE), !busy);
+        }
         if (IsDlgButtonChecked(panel, ID_DYNAMIC) == BST_CHECKED)
         {
             EnableWindow(Control(ID_EFFECT2), FALSE);
@@ -189,6 +227,10 @@ namespace
         request.requestId = ++nextRequest;
         if (!request.requestId) request.requestId = ++nextRequest;
         pendingRequest = request.requestId;
+        rosterRequest = request.operation == LA_SESSION_ALL ? request.requestId : 0;
+        markOnReply = request.operation == LA_SESSION && request.progressionIndex == 1;
+        capturePreset = request.operation == LA_SESSION && request.progressionIndex == 2;
+        eventReply = request.progressionIndex == 3 && (request.operation == LA_SUMMON || request.operation == LA_SUMMON_REMOVE);
         if (request.operation == LA_READ)
         {
             catalogReady = false;
@@ -287,7 +329,7 @@ namespace
 
     void ShowPage(int selected)
     {
-        for (int page = 0; page < 6; ++page)
+        for (int page = 0; page < 9; ++page)
             for (size_t i = 0; i < pages[page].size(); ++i)
                 ShowWindow(pages[page][i], page == selected ? SW_SHOW : SW_HIDE);
     }
@@ -295,8 +337,8 @@ namespace
     void BuildControls()
     {
         tabControl = AddControl(WC_TABCONTROLA, "", WS_TABSTOP, ID_TABS, 12, 12, 730, 32);
-        const char* names[] = { "Personagem", "Criar itens", "Dinheiro e RE", "Dual / Symbol", "Progressoes", "Monstros" };
-        for (int i = 0; i < 6; ++i)
+        const char* names[] = { "Personagem", "Criar itens", "Dinheiro e RE", "Dual / Symbol", "Progressoes", "Monstros", "Mapa / Sessao", "Historico", "Ferramentas" };
+        for (int i = 0; i < 9; ++i)
         {
             TCITEMA tab = {};
             tab.mask = TCIF_TEXT;
@@ -333,11 +375,15 @@ namespace
         }
         AddControl("BUTTON", "Efeito dinamico (consumivel)", BS_AUTOCHECKBOX | WS_TABSTOP, ID_DYNAMIC, 30, 237, 250, 24, 1);
         AddControl("BUTTON", "Item high", BS_AUTOCHECKBOX | WS_TABSTOP, ID_HIGH, 315, 237, 150, 24, 1);
+        AddControl("BUTTON", "Legend", BS_AUTOCHECKBOX | WS_TABSTOP, ID_LEGEND, 470, 237, 220, 24, 1);
         for (int i = 0; i < 3; ++i)
             AddControl("COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, ID_EFFECT1 + i, 30, 275 + i * 35, 325, 230, 1);
         AddControl("EDIT", "Configure o item e clique em Gerar previa.", ES_MULTILINE | ES_READONLY | WS_VSCROLL, ID_PREVIEW_TEXT, 380, 275, 315, 155, 1);
         AddControl("BUTTON", "Gerar previa", WS_TABSTOP, ID_PREVIEW, 30, 397, 150, 32, 1);
         AddControl("BUTTON", "Adicionar ao inventario", WS_TABSTOP, ID_CREATE, 30, 445, 245, 32, 1);
+        AddControl("STATIC", "Variante Legend (0 = sorteio)", 0, 0, 380, 437, 220, 20, 1);
+        AddControl("EDIT", "0", ES_NUMBER | WS_TABSTOP, ID_LEGEND_VARIANT, 380, 459, 70, 23, 1);
+        AddControl("BUTTON", "Consultar variantes", WS_TABSTOP, ID_LEGEND_CATALOG, 465, 455, 220, 30, 1);
 
         const char* currencyLabels[] = { "Ouro no inventario", "Saldo no banco", "RE - Raja Emblems no inventario" };
         for (int i = 0; i < 3; ++i)
@@ -373,14 +419,60 @@ namespace
         }
         AddControl("STATIC", "", 0, ID_PROGRESS_HINT, 30, 300, 650, 65, 4);
         AddControl("BUTTON", "Aplicar progressao selecionada", WS_TABSTOP, ID_APPLY_PROGRESS, 30, 390, 320, 32, 4);
+        AddControl("BUTTON", "Desfazer ultima tatica", WS_TABSTOP, ID_UNDO_TACTIC, 375, 390, 210, 32, 4);
+        AddControl("BUTTON", "Capturar preset", WS_TABSTOP, ID_SAVE_PRESET, 30, 445, 180, 32, 4);
+        AddControl("BUTTON", "Reaplicar preset", WS_TABSTOP, ID_APPLY_PRESET, 225, 445, 180, 32, 4);
         FillProgressList();
         AddControl("STATIC", "Buscar monstro por nome ou ID", 0, 0, 30, 65, 650, 22, 5);
         AddControl("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, ID_MONSTER_SEARCH, 30, 93, 650, 25, 5);
         AddControl("COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, ID_MONSTER, 30, 145, 650, 280, 5);
-        AddControl("STATIC", "Quantidade (1-20)", 0, 0, 30, 200, 300, 22, 5);
+        AddControl("STATIC", "Quantidade (1-20)", 0, 0, 30, 200, 180, 22, 5);
         AddControl("EDIT", "1", ES_NUMBER | WS_TABSTOP, ID_MONSTER_COUNT, 30, 230, 150, 25, 5);
-        AddControl("STATIC", "Cria monstros livres perto do personagem, no mapa atual.\r\nUsa locais transitaveis e nao ativa respawn automatico.\r\nIntervalo minimo entre comandos: 3 segundos.", 0, 0, 30, 290, 650, 80, 5);
-        AddControl("BUTTON", "Invocar monstros", WS_TABSTOP, ID_SUMMON, 30, 400, 260, 32, 5);
+        AddControl("STATIC", "Ondas (1-5)", 0, 0, 210, 200, 170, 22, 5);
+        AddControl("EDIT", "1", ES_NUMBER | WS_TABSTOP, ID_WAVE_COUNT, 210, 230, 150, 25, 5);
+        AddControl("STATIC", "Intervalo em segundos (3-60)", 0, 0, 390, 200, 290, 22, 5);
+        AddControl("EDIT", "5", ES_NUMBER | WS_TABSTOP, ID_WAVE_DELAY, 390, 230, 150, 25, 5);
+        AddControl("BUTTON", "Invocar monstros", WS_TABSTOP, ID_SUMMON, 30, 290, 190, 32, 5);
+        AddControl("BUTTON", "Parar ondas", WS_TABSTOP, ID_WAVE_STOP, 235, 290, 160, 32, 5);
+        AddControl("BUTTON", "Listar grupos ativos", WS_TABSTOP, ID_SUMMON_LIST, 30, 355, 190, 32, 5);
+        AddControl("STATIC", "ID do grupo", 0, 0, 30, 420, 100, 25, 5);
+        AddControl("EDIT", "", ES_NUMBER | WS_TABSTOP, ID_SUMMON_GROUP, 130, 417, 120, 25, 5);
+        AddControl("BUTTON", "Remover grupo", WS_TABSTOP, ID_SUMMON_REMOVE, 265, 414, 170, 32, 5);
+        AddControl("STATIC", "Mapa e coordenadas do servidor", 0, ID_MAP_INFO, 30, 68, 650, 22, 6);
+        AddControl("STATIC", "X / Y", 0, 0, 30, 105, 50, 25, 6);
+        AddControl("EDIT", "0", ES_NUMBER | WS_TABSTOP, ID_MAP_X, 85, 102, 95, 25, 6);
+        AddControl("EDIT", "0", ES_NUMBER | WS_TABSTOP, ID_MAP_Y, 195, 102, 95, 25, 6);
+        AddControl("BUTTON", "Teleportar", WS_TABSTOP, ID_TELEPORT, 310, 99, 220, 32, 6);
+        AddControl("BUTTON", "Marcar posicao atual", WS_TABSTOP, ID_MARK, 30, 150, 200, 32, 6);
+        AddControl("BUTTON", "Voltar ao ponto marcado", WS_TABSTOP, ID_RETURN, 245, 150, 220, 32, 6);
+        AddControl("BUTTON", "Jogadores neste mapa", WS_TABSTOP, ID_SESSION, 30, 230, 210, 32, 6);
+        AddControl("BUTTON", "Reunir jogadores aqui", WS_TABSTOP, ID_GATHER, 255, 230, 230, 32, 6);
+        AddControl("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, ID_ANNOUNCEMENT, 30, 293, 460, 25, 6);
+        SendMessage(Control(ID_ANNOUNCEMENT), EM_SETLIMITTEXT, 119, 0);
+        AddControl("BUTTON", "Enviar aviso ao mapa", WS_TABSTOP, ID_ANNOUNCE, 505, 290, 190, 32, 6);
+        AddControl("STATIC", "Codigo do mapa / busca por nome", 0, 0, 30, 352, 460, 22, 6);
+        AddControl("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, ID_MAP_CODE, 30, 380, 460, 25, 6);
+        SendMessage(Control(ID_MAP_CODE), EM_SETLIMITTEXT, 19, 0);
+        AddControl("BUTTON", "Buscar mapas", WS_TABSTOP, ID_MAP_SEARCH, 505, 377, 190, 32, 6);
+        AddControl("LISTBOX", "", LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP, ID_HISTORY, 30, 65, 680, 420, 7);
+        AddControl("STATIC", "Nome do evento", 0, 0, 30, 451, 120, 20, 5);
+        AddControl("EDIT", "Arena", ES_AUTOHSCROLL | WS_TABSTOP, ID_EVENT_NAME, 30, 474, 155, 23, 5);
+        SendMessage(Control(ID_EVENT_NAME), EM_SETLIMITTEXT, 30, 0);
+        AddControl("BUTTON", "Salvar evento", WS_TABSTOP, ID_EVENT_SAVE, 199, 470, 140, 30, 5);
+        AddControl("BUTTON", "Iniciar salvo", WS_TABSTOP, ID_EVENT_RUN, 350, 470, 140, 30, 5);
+        AddControl("BUTTON", "Encerrar evento", WS_TABSTOP, ID_EVENT_END, 501, 470, 140, 30, 5);
+        AddControl("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, ID_ADV_TARGET, 30, 68, 200, 25, 8);
+        SendMessage(Control(ID_ADV_TARGET), EM_SETLIMITTEXT, 19, 0);
+        AddControl("BUTTON", "Inspecionar personagem", WS_TABSTOP, ID_INSPECT, 245, 65, 205, 32, 8);
+        AddControl("BUTTON", "Mapas e jogadores", WS_TABSTOP, ID_SESSION_ALL, 465, 65, 225, 32, 8);
+        AddControl("BUTTON", "Restaurar HP / MP", WS_TABSTOP, ID_RECOVER_HP, 30, 112, 150, 30, 8);
+        AddControl("BUTTON", "Limpar maldicoes", WS_TABSTOP, ID_RECOVER_CURSE, 190, 112, 160, 30, 8);
+        AddControl("BUTTON", "Ressuscitar", WS_TABSTOP, ID_REVIVE, 360, 112, 130, 30, 8);
+        AddControl("BUTTON", "Historico do servidor", WS_TABSTOP, ID_AUDIT, 500, 112, 190, 30, 8);
+        AddControl("BUTTON", "Criar alvo (aba Monstros)", WS_TABSTOP, ID_TRAINING, 30, 156, 225, 30, 8);
+        AddControl("BUTTON", "Medir dano dos alvos", WS_TABSTOP, ID_TRAINING_STATS, 268, 156, 205, 30, 8);
+        AddControl("BUTTON", "Avisar todos os mapas", WS_TABSTOP, ID_ANNOUNCE_ALL, 485, 156, 205, 30, 8);
+        AddControl("EDIT", "", ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_TABSTOP, ID_ADV_DETAILS, 30, 201, 660, 288, 8);
         AddControl("BUTTON", "Atualizar dados", WS_TABSTOP, ID_REFRESH, 30, 510, 160, 30);
         AddControl("STATIC", "Conectando ao servidor...", 0, ID_STATUS, 210, 508, 500, 46);
         FillItems();
@@ -389,27 +481,216 @@ namespace
         SetBusy(false);
     }
 
+    bool EventSection(char (&section)[48])
+    {
+        char name[31];
+        GetWindowTextA(Control(ID_EVENT_NAME), name, sizeof(name));
+        if (!name[0] || strspn(name, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 _-") != strlen(name))
+        {
+            Status("Nome do evento: letras, numeros, espacos, hifen e sublinhado.");
+            return false;
+        }
+        sprintf_s(section, "Evento %s", name);
+        return true;
+    }
+
+    bool SaveEvent()
+    {
+        char section[48];
+        if (!EventSection(section)) return false;
+        DWORD quantity, waves, seconds, x, y;
+        if (SendMessage(Control(ID_MONSTER), CB_GETCURSEL, 0, 0) == CB_ERR ||
+            !ReadNumber(ID_MONSTER_COUNT, 20, quantity) || !quantity ||
+            !ReadNumber(ID_WAVE_COUNT, 5, waves) || !waves ||
+            !ReadNumber(ID_WAVE_DELAY, 60, seconds) || seconds < 3)
+        {
+            Status("Escolha monstro, quantidade, ondas e intervalo validos.");
+            return false;
+        }
+        const LocalAdminState& point = returnPoint.map[0] ? returnPoint : currentState;
+        x = point.mapX; y = point.mapY;
+        if (!point.map[0] || !x || !y) { Status("Marque o ponto do evento na aba Mapa / Sessao."); return false; }
+        char setup[180];
+        const int monster = SelectedValue(ID_MONSTER);
+        sprintf_s(setup, "%s %lu %lu %d %lu %lu %lu", point.map, x, y, monster, quantity, waves, seconds);
+        char announcement[120];
+        GetWindowTextA(Control(ID_ANNOUNCEMENT), announcement, sizeof(announcement));
+        if (!WritePrivateProfileStringA(section, "Anuncio", announcement, eventFile) ||
+            !WritePrivateProfileStringA(section, "Arena", setup, eventFile))
+        {
+            Status("Falha ao gravar gm-events.ini.");
+            return false;
+        }
+        return true;
+    }
+
     void OnCommand(int id, int notification)
     {
         if (id == ID_MONSTER_SEARCH && notification == EN_CHANGE) { FillMonsters(); return; }
         if (id == ID_PROGRESS_KIND && notification == CBN_SELCHANGE) { FillProgressList(); return; }
         if (id == ID_PROGRESS_INDEX && notification == CBN_SELCHANGE) { FillProgressValue(); return; }
         if (id == ID_SEARCH && notification == EN_CHANGE) { FillItems(); return; }
-        if (id == ID_DYNAMIC && notification == BN_CLICKED) { FillEffects(); return; }
+        if (id == ID_LEGEND_VARIANT && notification == EN_CHANGE) { InvalidatePreview(); return; }
+        if (id == ID_LEGEND && notification == BN_CLICKED) { InvalidatePreview(); SetBusy(false); return; }
+        if (id == ID_DYNAMIC && notification == BN_CLICKED) { InvalidatePreview(); FillEffects(); return; }
         if ((id >= ID_ITEMS && id <= ID_HIGH) && (notification == EN_CHANGE || notification == CBN_SELCHANGE || notification == BN_CLICKED))
             InvalidatePreview();
+        if (id == ID_WAVE_STOP && notification == BN_CLICKED)
+        {
+            KillTimer(panel, 2);
+            wavesRemaining = 0;
+            SetBusy(pendingRequest != 0);
+            Status("Ondas canceladas. Os grupos ativos podem ser removidos pelo ID.");
+            return;
+        }
         if (notification != BN_CLICKED || pendingRequest) return;
         LocalAdminRequest request = {};
         request.state = currentState;
         DWORD value = 0;
         switch (id)
         {
+        case ID_EVENT_SAVE:
+            if (SaveEvent()) Status("Evento salvo. Use o mesmo nome para iniciar novamente.");
+            return;
+        case ID_EVENT_RUN:
+            {
+                if (wavesRemaining || activeEventGroup) { Status("Encerre o evento ou pare as ondas atuais."); return; }
+                char section[48], setup[180], map[20];
+                if (!EventSection(section)) return;
+                unsigned long x, y, quantity, waves, seconds;
+                int monster;
+                GetPrivateProfileStringA(section, "Arena", "", setup, sizeof(setup), eventFile);
+                if (sscanf_s(setup, "%19s %lu %lu %d %lu %lu %lu", map, unsigned(sizeof(map)),
+                    &x, &y, &monster, &quantity, &waves, &seconds) != 7 ||
+                    x < 1 || x > 32767 || y < 1 || y > 32767 || !quantity || quantity > 20 ||
+                    !waves || waves > 5 || seconds < 3 || seconds > 60)
+                { Status("Evento ausente ou com configuracao invalida."); return; }
+                if (_stricmp(currentState.map, map)) { Status("Entre no mapa do evento e atualize os dados."); return; }
+                request.operation = LA_SUMMON;
+                request.progressionIndex = 3;
+                request.itemNumber = monster;
+                request.quantity = quantity;
+                request.state.mapX = x;
+                request.state.mapY = y;
+                GetPrivateProfileStringA(section, "Anuncio", "", request.announcement, sizeof(request.announcement), eventFile);
+                wavesRemaining = waves - 1;
+                waveDelay = seconds * 1000;
+                waveRequest = request;
+                activeEventLocation = request.state;
+            }
+            break;
+        case ID_EVENT_END:
+            if (_stricmp(currentState.map, activeEventLocation.map)) { Status("Volte ao mapa do evento."); return; }
+            KillTimer(panel, 2);
+            wavesRemaining = 0;
+            request.operation = LA_SUMMON_REMOVE;
+            request.progressionIndex = 3;
+            request.previewToken = activeEventGroup;
+            request.state = activeEventLocation;
+            break;
+        case ID_INSPECT:
+            request.operation = LA_INSPECT;
+            GetWindowTextA(Control(ID_ADV_TARGET), request.target, sizeof(request.target));
+            break;
+        case ID_RECOVER_HP:
+        case ID_RECOVER_CURSE:
+        case ID_REVIVE:
+            request.operation = LA_RECOVER;
+            request.progressionIndex = id - ID_RECOVER_HP;
+            break;
+        case ID_TRAINING:
+            if (SendMessage(Control(ID_MONSTER), CB_GETCURSEL, 0, 0) == CB_ERR)
+            { Status("Selecione o modelo do alvo na aba Monstros."); return; }
+            request.operation = LA_TRAINING;
+            request.itemNumber = SelectedValue(ID_MONSTER);
+            request.quantity = 1;
+            break;
+        case ID_TRAINING_STATS: request.operation = LA_TRAINING_STATS; break;
+        case ID_SESSION_ALL: request.operation = LA_SESSION_ALL; break;
+        case ID_ANNOUNCE_ALL:
+            request.operation = LA_ANNOUNCE_ALL;
+            GetWindowTextA(Control(ID_ANNOUNCEMENT), request.announcement, sizeof(request.announcement));
+            if (!request.announcement[0]) { Status("Digite o aviso na aba Mapa / Sessao."); return; }
+            break;
+        case ID_AUDIT: request.operation = LA_AUDIT; break;
+        case ID_LEGEND_CATALOG:
+            request.operation = LA_LEGEND_CATALOG;
+            request.itemNumber = SelectedValue(ID_ITEMS);
+            if (!request.itemNumber) { Status("Selecione um item primeiro."); return; }
+            break;
+        case ID_MAP_SEARCH:
+            request.operation = LA_MAP_SEARCH;
+            GetWindowTextA(Control(ID_MAP_CODE), request.state.map, sizeof(request.state.map));
+            break;
+        case ID_UNDO_TACTIC: request.operation = LA_UNDO_TACTIC; break;
+        case ID_SAVE_PRESET:
+            request.operation = LA_SESSION;
+            request.progressionIndex = 2;
+            break;
+        case ID_APPLY_PRESET:
+            if (!preset.character[0]) return;
+            {
+                char confirmation[220];
+                sprintf_s(confirmation, "Aplicar o preset de %s (nivel %d)? Substitui atributos, nivel, XP, pontos livres, as 13 taticas e magias Wizard/Priest.",
+                    preset.character, preset.level);
+                if (MessageBoxA(panel, confirmation, "Reaplicar preset", MB_OKCANCEL) != IDOK) return;
+            }
+            request.operation = LA_PRESET;
+            request.state = preset;
+            break;
+        case ID_SUMMON_LIST: request.operation = LA_SUMMON_LIST; break;
+        case ID_SUMMON_REMOVE:
+            if (!ReadNumber(ID_SUMMON_GROUP, 0xffffffffUL, value) || !value) { Status("Informe o ID do grupo."); return; }
+            request.operation = LA_SUMMON_REMOVE;
+            request.previewToken = value;
+            break;
+        case ID_MARK:
+            request.operation = LA_SESSION;
+            request.progressionIndex = 1;
+            break;
+        case ID_RETURN:
+            request.operation = LA_TELEPORT;
+            if (_stricmp(returnPoint.map, currentState.map) != 0)
+            {
+                Status("Volte ao mapa do ponto marcado antes de restaurar suas coordenadas.");
+                return;
+            }
+            request.state = returnPoint;
+            break;
+        case ID_TELEPORT:
+            request.operation = LA_TELEPORT;
+            if (GetWindowTextLengthA(Control(ID_MAP_CODE)))
+                GetWindowTextA(Control(ID_MAP_CODE), request.state.map, sizeof(request.state.map));
+            if (!ReadNumber(ID_MAP_X, 32767, value)) { Status("Coordenada X invalida."); return; }
+            request.state.mapX = value;
+            if (!ReadNumber(ID_MAP_Y, 32767, value)) { Status("Coordenada Y invalida."); return; }
+            request.state.mapY = value;
+            break;
+        case ID_SESSION: request.operation = LA_SESSION; break;
+        case ID_GATHER:
+            if (MessageBoxA(panel, "Reunir os outros jogadores deste mapa na sua posicao?", "Painel GM", MB_OKCANCEL) != IDOK) return;
+            request.operation = LA_GATHER;
+            break;
+        case ID_ANNOUNCE:
+            request.operation = LA_ANNOUNCE;
+            GetWindowTextA(Control(ID_ANNOUNCEMENT), request.announcement, sizeof(request.announcement));
+            break;
         case ID_SUMMON:
+        {
             if (!catalogReady || SendMessage(Control(ID_MONSTER), CB_GETCURSEL, 0, 0) == CB_ERR) { Status("Selecione um monstro do catalogo do servidor."); return; }
             request.operation = LA_SUMMON; request.itemNumber = SelectedValue(ID_MONSTER);
             if (!ReadNumber(ID_MONSTER_COUNT, 20, value) || !value) { Status("Quantidade: 1-20."); return; }
             request.quantity = value;
+            if (wavesRemaining) { Status("Pare as ondas atuais antes de iniciar outras."); return; }
+            if (!ReadNumber(ID_WAVE_COUNT, 5, value) || !value) { Status("Ondas: 1 a 5."); return; }
+            const DWORD count = value;
+            if (!ReadNumber(ID_WAVE_DELAY, 60, value) || value < 3) { Status("Intervalo: 3 a 60 segundos."); return; }
+            wavesRemaining = count - 1;
+            waveDelay = value * 1000;
+            waveRequest = request;
+            waveRequest.progressionIndex = 1;
             break;
+        }
         case ID_APPLY_DUAL:
             request.operation = LA_DUAL; request.state.dualClass = SelectedValue(ID_DUAL_CLASS);
             if (!ReadNumber(ID_DUAL_STEP, 5, value)) { Status("Etapa dual: 0-5."); return; } request.state.dualStep = value;
@@ -461,6 +742,18 @@ namespace
             request.quantity = value;
             if (!ReadNumber(ID_DURABILITY, 65535, value)) { Status("Durabilidade: 0 a 65535."); return; }
             request.durability = value;
+            if (IsDlgButtonChecked(panel, ID_LEGEND) == BST_CHECKED)
+            {
+                request.highItem = 2;
+                if (!ReadNumber(ID_LEGEND_VARIANT, 9, value)) { Status("Variante: 0 a 9."); return; }
+                request.legendVariant = value;
+                if (value)
+                {
+                    if (!ReadNumber(ID_GRADE, 8, value) || value < 3) { Status("Grau Legend: 3 a 8."); return; }
+                    request.grade = value;
+                }
+                break;
+            }
             if (!ReadNumber(ID_GRADE, 15, value)) { Status("Grau: 0 a 15."); return; }
             request.grade = value;
             if (request.grade && !catalogReady) { Status("Aguarde o catalogo de efeitos do servidor."); return; }
@@ -490,6 +783,22 @@ namespace
                 ShowPage(TabCtrl_GetCurSel(tabControl));
             return 0;
         case WM_TIMER:
+            if (wParam == 2)
+            {
+                if (pendingRequest) return 0;
+                KillTimer(window, 2);
+                if (!IsWindowVisible(panel) || !Hero || !SMenu[MN_MAININTERFACE].bActive || wavesRemaining <= 0)
+                {
+                    wavesRemaining = 0;
+                    SetBusy(false);
+                    return 0;
+                }
+                --wavesRemaining;
+                SendRequest(waveRequest);
+                return 0;
+            }
+            KillTimer(window, 2);
+            wavesRemaining = 0;
             KillTimer(window, 1);
             pendingRequest = 0;
             previewToken = 0;
@@ -547,15 +856,81 @@ void ReceiveLocalAdminReply(const void* payload, int length)
     if (length != sizeof(LocalAdminReply)) return;
     LocalAdminReply reply;
     memcpy(&reply, payload, sizeof(reply));
-    if (!panel || reply.version != LOCAL_ADMIN_VERSION || reply.requestId != pendingRequest) return;
+    if (!panel || reply.version != LOCAL_ADMIN_VERSION) return;
+    if (reply.operation == LA_SESSION_ALL && reply.previewToken == 1)
+    {
+        if (reply.requestId != rosterRequest) return;
+        reply.details[sizeof(reply.details) - 1] = 0;
+        HWND details = Control(ID_ADV_DETAILS);
+        const int end = GetWindowTextLengthA(details);
+        if (end + strlen(reply.details) >= 32000) return;
+        std::vector<char> existing(end + 1);
+        GetWindowTextA(details, existing.data(), static_cast<int>(existing.size()));
+        SetWindowTextA(details, (std::string(existing.data()) + reply.details).c_str());
+        return;
+    }
+    if (reply.requestId != pendingRequest) return;
     reply.message[sizeof(reply.message) - 1] = 0;
+    reply.details[sizeof(reply.details) - 1] = 0;
+    if (reply.details[0])
+    {
+        SetWindowTextA(Control(ID_ADV_DETAILS), reply.details);
+        TabCtrl_SetCurSel(tabControl, 8);
+        ShowPage(8);
+    }
+    if (eventReply && reply.operation == LA_SUMMON && reply.success)
+    {
+        activeEventGroup = reply.summonGroup;
+        waveRequest.summonGroup = reply.summonGroup;
+    }
+    if (eventReply && reply.operation == LA_SUMMON_REMOVE && reply.success)
+        activeEventGroup = 0;
     reply.state.character[sizeof(reply.state.character) - 1] = 0;
     KillTimer(panel, 1);
     pendingRequest = 0;
     canUndo = reply.canUndo != 0;
     if (reply.success)
     {
+        const LocalAdminState previous = currentState;
         currentState = reply.state;
+        if (previous.character[0] && strcmp(previous.character, currentState.character))
+        {
+            returnPoint = {};
+            preset = {};
+            SendMessage(Control(ID_HISTORY), LB_RESETCONTENT, 0, 0);
+        }
+        if (capturePreset)
+        {
+            preset = currentState;
+            strcpy_s(reply.message, "Preset capturado nesta sessao.");
+        }
+        if (markOnReply)
+        {
+            returnPoint = currentState;
+            strcpy_s(reply.message, "Posicao marcada nesta sessao.");
+        }
+        char mapInfo[100];
+        sprintf_s(mapInfo, "%s | X %d | Y %d", currentState.map, currentState.mapX, currentState.mapY);
+        SetWindowTextA(Control(ID_MAP_INFO), mapInfo);
+        if (reply.operation == LA_READ || reply.operation == LA_TELEPORT || markOnReply)
+        {
+            SetNumber(ID_MAP_X, currentState.mapX);
+            SetNumber(ID_MAP_Y, currentState.mapY);
+        }
+        if (reply.operation == LA_PROGRESSION || reply.operation == LA_UNDO_TACTIC || reply.operation == LA_PRESET)
+        {
+            for (int i = 0; i < 13; ++i)
+            {
+                if (previous.skills[88 + i] == currentState.skills[88 + i] &&
+                    previous.tacticExp[i] == currentState.tacticExp[i] &&
+                    previous.tacticStep[i] == currentState.tacticStep[i]) continue;
+                char detail[160];
+                sprintf_s(detail, "Tatica %d: nivel %d -> %d | XP %lu -> %lu", 88 + i,
+                    int(previous.skills[88 + i]), int(currentState.skills[88 + i]),
+                    static_cast<unsigned long>(previous.tacticExp[i]), static_cast<unsigned long>(currentState.tacticExp[i]));
+                SendMessageA(Control(ID_HISTORY), LB_INSERTSTRING, 0, reinterpret_cast<LPARAM>(detail));
+            }
+        }
         if (Hero) {
             Hero->aStepInfo[CLS_STEP] = static_cast<char>(currentState.dualStep);
             Hero->aStepInfo[DUAL_CLS] = static_cast<char>(currentState.dualClass);
@@ -564,7 +939,7 @@ void ReceiveLocalAdminReply(const void* payload, int length)
         memcpy(SCharacterData.SkillId, currentState.skills, sizeof(currentState.skills));
         memcpy(SCharacterData.MagicId, SCharacterData.nCharacterData[SPELL] == PRIEST_SPELL ? currentState.priest : currentState.wizard, 200);
         SCharacterData.faith = currentState.extraProgress[5];
-        if (reply.operation == LA_PROGRESSION) {
+        if (reply.operation == LA_PROGRESSION || reply.operation == LA_PRESET) {
             ReadMagicTable();
             ResetMagicQuickArray();
             if (SCharacterData.nCharacterData[SPELL] == PRIEST_SPELL) MagicSetting2();
@@ -576,7 +951,7 @@ void ReceiveLocalAdminReply(const void* payload, int length)
         g_SymBolMgr.SetDualItem(currentState.symbolNumber, currentState.symbolGrade);
         SCharacterData.nMoney = currentState.gold;
         SCharacterData.BankMoney = currentState.bank;
-        if (reply.operation == LA_READ || reply.operation == LA_ATTRIBUTES || reply.operation == LA_UNDO_ATTRIBUTES)
+        if (reply.operation == LA_READ || reply.operation == LA_ATTRIBUTES || reply.operation == LA_UNDO_ATTRIBUTES || reply.operation == LA_PRESET)
         {
             const int kinds[] = { STR, DEX, CON, WIS, INT_, CHA, MOVP, ENDU, MOR, LUCK, WSPS };
             for (int i = 0; i < LOCAL_ADMIN_ATTRIBUTE_COUNT; ++i)
@@ -585,13 +960,28 @@ void ReceiveLocalAdminReply(const void* payload, int length)
             SCharacterData.nExp = currentState.experience;
             SCharacterData.LvUpPoint = currentState.points;
         }
-        FillState(reply.operation == LA_READ || reply.operation == LA_ATTRIBUTES || reply.operation == LA_UNDO_ATTRIBUTES);
+        FillState(reply.operation == LA_READ || reply.operation == LA_ATTRIBUTES || reply.operation == LA_UNDO_ATTRIBUTES || reply.operation == LA_PRESET);
         if (reply.operation == LA_PREVIEW)
         {
             previewToken = reply.previewToken;
             SetWindowTextA(Control(ID_PREVIEW_TEXT), reply.message);
         }
         if (reply.operation == LA_CREATE) previewToken = 0;
+    }
+    if (reply.operation != LA_READ && reply.operation != LA_PREVIEW)
+    {
+        SendMessageA(Control(ID_HISTORY), LB_INSERTSTRING, 0, reinterpret_cast<LPARAM>(reply.message));
+        while (SendMessage(Control(ID_HISTORY), LB_GETCOUNT, 0, 0) > 100)
+            SendMessage(Control(ID_HISTORY), LB_DELETESTRING, 100, 0);
+    }
+    if (reply.operation == LA_SUMMON && wavesRemaining > 0)
+    {
+        if (reply.success && IsWindowVisible(panel))
+        {
+            if (waveRequest.progressionIndex != 3) waveRequest.state = reply.state;
+            SetTimer(panel, 2, waveDelay, NULL);
+        }
+        else wavesRemaining = 0;
     }
     Status(reply.message);
     SetBusy(false);

@@ -342,7 +342,7 @@ void AddCasterEXP(CHARLIST *attacker, CHARLIST *defender, int result, int magicT
 		return;
 	}
 	
-	if (attacker->IsNpc())
+	if (attacker->IsNpc() || (defender && defender->localAdminTraining))
 	{
 		return;
 	}
