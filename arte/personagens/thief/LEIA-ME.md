@@ -17,3 +17,7 @@ Thief redesenhado em HD por cima do corpo masculino original do jogo (`Char/0010
 ## Escala
 
 No jogo, o boneco mede uns 65 a 67 px de altura. Se o quadro HD for usado junto com o cenário original, é preciso reduzir até o corpo ficar com essa altura.
+
+## Como foi feito
+
+Passo a passo completo, com os scripts: [arte/metodo/METODO.md](../../metodo/METODO.md)
