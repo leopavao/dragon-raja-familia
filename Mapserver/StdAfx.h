@@ -11,11 +11,15 @@
 
 #pragma warning(disable: 4996)
 
-#include <afx.h>
+#define WIN32_LEAN_AND_MEAN
+#pragma pack(push, 8)
+#include <winsock2.h>
+#include <cassert>
+#include <ctime>
 #include <ole2.h>
 #include <initguid.h>
 #include <windows.h>
-#include <winsock2.h>
+#pragma pack(pop)
 // 공유 라이브러리
 #pragma comment (lib, "../Library/HSEL.lib")
 #include "../Shared/HSEL.h"

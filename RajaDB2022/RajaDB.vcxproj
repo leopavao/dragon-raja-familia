@@ -253,6 +253,7 @@
     <ClInclude Include="typedef.h" />
     <ClInclude Include="WinZS.h" />
   </ItemGroup>
+  <Import Project="..\tools\family-build.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

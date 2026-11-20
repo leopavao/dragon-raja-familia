@@ -27,14 +27,20 @@ EventExp g_EventExp;
 int CEventTime::SetTime( TIMESTAMP_STRUCT *pStart, TIMESTAMP_STRUCT *pEnd )
 {
 	Remove();
-	CTime temp_start( pStart->year, pStart->month, pStart->day,
-		pStart->hour, pStart->minute, pStart->second );
-
-	CTime temp_end( pEnd->year, pEnd->month, pEnd->day,
-		pEnd->hour, pEnd->minute, pEnd->second );
-
-	m_timeStart = temp_start;
-	m_timeEnd = temp_end;
+    const auto localTime = [](const TIMESTAMP_STRUCT* value) -> std::time_t
+    {
+        std::tm parts = {};
+        parts.tm_year = value->year - 1900;
+        parts.tm_mon = value->month - 1;
+        parts.tm_mday = value->day;
+        parts.tm_hour = value->hour;
+        parts.tm_min = value->minute;
+        parts.tm_sec = value->second;
+        parts.tm_isdst = -1;
+        return std::mktime(&parts);
+    };
+    m_timeStart = localTime(pStart);
+    m_timeEnd = localTime(pEnd);
 
 	//MyLog( 0, "%s", m_pTimeStart->Format( "%Y/%m/%d %H:%M:%S" ) );
 	//MyLog( 0, "%s", m_pTimeEnd->Format( "%Y/%m/%d %H:%M:%S" ) );
@@ -47,8 +53,7 @@ int CEventTime::CheckActive()
 {
 	m_nEventActive = 0;
 
-	CTime curr_time;
-	curr_time = CTime::GetCurrentTime();
+	const std::time_t curr_time = std::time(NULL);
 
 	if( m_timeStart > curr_time || m_timeEnd < curr_time ) return 0;
 

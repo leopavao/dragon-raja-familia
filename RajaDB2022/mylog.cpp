@@ -9,7 +9,7 @@
 #include <time.h>
 #include "mylog.h"
 #include "monitor.h"
-#include <afxmt.h>
+#include <windows.h>
 
 
 // Default Log Level

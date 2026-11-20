@@ -13,7 +13,7 @@
 				
 //2001/02/19 zhh
 //2001/01/29 zhh
-#include <afx.h>
+// Windows headers are supplied by stdafx.h.
 #include "Main.h" 
 #include <process.h>
 

@@ -14,13 +14,16 @@
 
 #pragma warning(disable: 4996)
 
-#include <afx.h>
+#include <cassert>
+#define WIN32_LEAN_AND_MEAN
+#pragma pack(push, 8)
 //#include <windows.h>
 #include <winsock2.h>
 #include <windows.h>
 #include <stdio.h>
 #include <ole2.h>
 #include <initguid.h>
+#pragma pack(pop)
 
 //Libraries
 #pragma comment(lib, "ws2_32.lib")

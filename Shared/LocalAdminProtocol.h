@@ -39,7 +39,8 @@ enum LocalAdminOperation
     LA_TRAINING_STATS,
     LA_SESSION_ALL,
     LA_ANNOUNCE_ALL,
-    LA_AUDIT
+    LA_AUDIT,
+    LA_REVIVE
 };
 
 #pragma pack(push, 1)

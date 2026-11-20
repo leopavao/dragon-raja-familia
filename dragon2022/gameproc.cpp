@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include <Math.H>
 #include "gameproc.h"
+#include "LocalAdminPanel.h"
 
 #include "map.h"
 #include "char.h"
@@ -394,6 +395,7 @@ BOOL StartMenuProc(LPDIRECTDRAWINFO lpDirectDrawInfo)
 	{
 		return	FALSE;
 	}
+	UpdateLocalAdminLifeButton();
 
 	if (!g_bIsActive)
 	{
@@ -480,7 +482,8 @@ BOOL GameProc(LPDIRECTDRAWINFO lpDirectDrawInfo)//030703 lsw
 	CrackMgr.AutoCheckAccel();
 	CheckingAccelator_Sub1();
 
-	if (ProtocolProc(&connections, false) < 0) { return FALSE; }			// 010612 YGI
+	if (ProtocolProc(&connections, false) < 0) { return FALSE; }
+	UpdateLocalAdminLifeButton();			// 010612 YGI
 
 	ViewCheckRoutine(10);
 
@@ -1225,7 +1228,7 @@ int ProtocolWritingProc(t_connection* c)
 	fd_set			wfds;
 
 	if (!c->socket)	return(1);
-	if (c->outbuf == NULL) return 1;
+	if (c->outbuf == NULL && c->sendBufferOffset == c->sendBufferSize) return 1;
 
 	FD_ZERO(&wfds);
 	FD_SET(c->socket, &wfds);
@@ -1235,7 +1238,7 @@ int ProtocolWritingProc(t_connection* c)
 	tv.tv_usec = 0;
 	ret = select(c->socket, NULL, &wfds, NULL, &tv);
 
-	if (ret)
+	if (ret > 0 && FD_ISSET(c->socket, &wfds))
 		ret = HandleWriting(c);
 
 	if (ret < 0)

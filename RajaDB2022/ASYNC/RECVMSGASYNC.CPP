@@ -1,4 +1,4 @@
-#include <afx.h>
+#include "..\stdafx.h"
 //#include "..\Game.h"
 //#include "..\SprObject.h"
 //#include "..\ObjectManager.h"

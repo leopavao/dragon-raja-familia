@@ -2932,6 +2932,8 @@ typedef struct connection
 	int				state;
 	t_packet		*inbuf;
 	t_packet		*outbuf;
+	char sendBuffer[MAX_CLIENT_QUEUE_OUT_BUFFER];
+	int sendBufferSize, sendBufferOffset;
 	int				receive;
 	int				receive_count;
     DWORD			connect_time;

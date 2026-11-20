@@ -43,8 +43,8 @@ public :
 	int m_nEventNo;
 	int m_nEventActive;
 
-	CTime m_timeStart;
-	CTime m_timeEnd;
+	std::time_t m_timeStart;
+	std::time_t m_timeEnd;
 
 
 

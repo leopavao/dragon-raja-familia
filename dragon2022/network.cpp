@@ -4158,71 +4158,41 @@ int HandleReading(t_connection* c)
 //---------------------------------------------------------------------------------
 int HandleWriting( t_connection *c )
 {
-	t_packet	packet;
-	char		Buff[ MAX_CLIENT_QUEUE_OUT_BUFFER ];
-	int			addlen, Size, BuffPnt;
-	int			len;
-
-	BuffPnt = 0;
-	Size = sizeof( t_header );
-
-	while ( 1 )
-	{
-		DequeuePacket( &packet, 1 );
-
-		len = Size + data_size;
-
-		memcpy( &Buff[ BuffPnt ], &len, 2);
-		BuffPnt += 2;
-
-		memcpy( &Buff[ BuffPnt ], packet.h.data, Size );
-		BuffPnt += Size;
-
-		memcpy( &Buff[ BuffPnt ], packet.u.data, data_size );
-		BuffPnt += data_size;
-
-		if ( !connections.outbuf || BuffPnt > MAX_CLIENT_QUEUE_OUT_BUFFER - MAX_PACKET_SIZE )
-		{
-			break;
-		}
-	}	
-	
-		
-	if ( BuffPnt <= 0 )
-	{	
-		return( -21 );
-	}	
-		
-	Size = BuffPnt;
-		
-	BuffPnt = 0;
-	while(1)
-	{	
-		addlen = send( connections.socket, &Buff[ BuffPnt ], Size, 0 );
-		if ( addlen < 0 )
-		{
-			return( -22 );
-		}
-		else if ( addlen > 0 )
-		{
-			BuffPnt += addlen;
-			Size -= addlen;
-
-			g_SendBytes += addlen;
-		}
-
-		if ( Size < 0 )
-		{
-			return( -23 );
-		}
-
-		if ( Size == 0 )
-		{
-			break;
-		}
-	}	
-
-	return 1;
+    // Keep the encrypted wire bytes until the nonblocking socket accepts all of them.
+    // DequeuePacket advances the cipher; retrying it would corrupt the stream.
+    if (c->sendBufferOffset == c->sendBufferSize)
+    {
+        c->sendBufferOffset = c->sendBufferSize = 0;
+        while (c->outbuf)
+        {
+            const int frameSize = 2 + sizeof(t_header) + c->outbuf->h.header.size;
+            if (c->sendBufferSize + frameSize > MAX_CLIENT_QUEUE_OUT_BUFFER) break;
+            t_packet packet;
+            if (!DequeuePacket(&packet, 1)) break;
+            const short len = static_cast<short>(sizeof(t_header) + data_size);
+            char* target = c->sendBuffer + c->sendBufferSize;
+            memcpy(target, &len, 2);
+            memcpy(target + 2, packet.h.data, sizeof(t_header));
+            memcpy(target + 2 + sizeof(t_header), packet.u.data, data_size);
+            c->sendBufferSize += frameSize;
+        }
+    }
+    while (c->sendBufferOffset < c->sendBufferSize)
+    {
+        const int sent = send(c->socket, c->sendBuffer + c->sendBufferOffset,
+            c->sendBufferSize - c->sendBufferOffset, 0);
+        if (sent < 0)
+        {
+            const int error = WSAGetLastError();
+            if (error == WSAEWOULDBLOCK || error == WSAEINTR) return 1;
+            return -22;
+        }
+        if (!sent) return -22;
+        c->sendBufferOffset += sent;
+        g_SendBytes += sent;
+    }
+    c->sendBufferOffset = c->sendBufferSize = 0;
+    return 1;
 }		
 		
 //---------------------------------------------------------------------------------
@@ -4329,7 +4299,7 @@ int	HandleRunning(t_connection* c, bool flag)
 
 	FD_SET( c->socket, &rfds );
 
-	if ( c->outbuf )
+	if ( c->outbuf || c->sendBufferOffset < c->sendBufferSize )
 	{
 		FD_SET( c->socket, &wfds );
 	}
@@ -4343,7 +4313,7 @@ int	HandleRunning(t_connection* c, bool flag)
 	tv.tv_sec  = 0;
 	tv.tv_usec = 0;
 
-	if ( select( c->socket, &rfds, NULL, &efds, &tv) < 0 )
+	if ( select( c->socket, &rfds, &wfds, &efds, &tv) < 0 )
 	{
 		return( 1 );
 	}

@@ -549,6 +549,18 @@ void HandleLocalAdmin(int cn, const void* payload, int length)
         reply.success = 1;
         strcpy_s(reply.message, "Dados recebidos do servidor.");
         break;
+    case LA_REVIVE:
+        if (ch->viewtype != VIEWTYPE_GHOST_ || !ch->IsDead())
+            strcpy_s(reply.message, "O personagem precisa estar morto e em forma de fantasma.");
+        else
+        {
+            // Same full-resource resurrection as the revival item; consume no item.
+            SkillMgr.CharacterToAlive(ch, 1);
+            reply.success = 1;
+            changed = true;
+            strcpy_s(reply.message, "Personagem revivido instantaneamente.");
+        }
+        break;
     case LA_INSPECT:
         {
             CHARLIST* target = request.target[0] ? CheckServerName(request.target) : ch;
@@ -1172,14 +1184,22 @@ void HandleLocalAdmin(int cn, const void* payload, int length)
         }
         break;
     case LA_CREATE:
-        if (!drafts.count(cn) || drafts[cn].character != ch->Name ||
-            drafts[cn].token != request.previewToken || !request.previewToken)
-            strcpy_s(reply.message, "Gere uma nova previa antes de adicionar o item.");
-        else
         {
-            const ItemDraft draft = drafts[cn];
+            ItemDraft draft;
+            if (request.previewToken)
+            {
+                if (!drafts.count(cn) || drafts[cn].character != ch->Name ||
+                    drafts[cn].token != request.previewToken)
+                {
+                    strcpy_s(reply.message, "A previa expirou. Gere outra ou crie sem previa.");
+                    break;
+                }
+                draft = drafts[cn];
+            }
+            else if (!PrepareItem(request, draft, reply.message, sizeof(reply.message)))
+                break;
             if (EmptySlots(ch) < draft.copies)
-                strcpy_s(reply.message, "Espacos insuficientes no inventario. A previa foi mantida.");
+                strcpy_s(reply.message, "Espacos insuficientes no inventario. Nenhum item foi criado.");
             else
             {
                 // The map thread owns inventory mutations. All slots were checked before insertion.
@@ -1224,7 +1244,7 @@ void HandleLocalAdmin(int cn, const void* payload, int length)
         if (!reply.message[0]) strcpy_s(reply.message, "Aplicado no servidor. Salvamento enviado ao DBDemon.");
     }
     if (authorized && (!eventOperator || eventOperation) && (changed || request.operation == LA_SUMMON || request.operation == LA_SUMMON_REMOVE ||
-        request.operation == LA_ANNOUNCE || request.operation == LA_ANNOUNCE_ALL || request.operation == LA_RECOVER || request.operation == LA_TRAINING))
+        request.operation == LA_ANNOUNCE || request.operation == LA_ANNOUNCE_ALL || request.operation == LA_RECOVER || request.operation == LA_REVIVE || request.operation == LA_TRAINING))
         Audit(cn, request, reply);
     if (!reply.message[0]) strcpy_s(reply.message, "Operacao nao aplicada.");
     const bool verifyTactics = changed && (request.operation == LA_PRESET || request.operation == LA_UNDO_TACTIC ||

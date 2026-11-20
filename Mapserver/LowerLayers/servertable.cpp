@@ -1396,7 +1396,7 @@ bool CServerTable::RemoveConnectedServerDataFromHashTable( DWORD dwConnectionInd
 		pTest = this->m_ppServerTable[bb];
 		while( pTest )
 		{
-			ASSERT(pTest);
+			assert(pTest);
 			dwCount++;
 //			if( this->m_ppServerTable[pTest->wPosInHashTable] == NULL )
 //				_asm int 3;

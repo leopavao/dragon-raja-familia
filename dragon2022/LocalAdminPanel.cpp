@@ -8,6 +8,7 @@
 #include "network.h"
 #include "LocalAdminPanel.h"
 #include "SymbolMgr_Client.h"
+#include "CurrentMsgMgr.h"
 #include "../Shared/LocalAdminProtocol.h"
 #include <commctrl.h>
 #include <cerrno>
@@ -51,6 +52,8 @@ namespace
     };
 
     HWND panel = NULL;
+    HWND lifeWindow = NULL;
+    HWND lifeButton = NULL;
     HWND tabControl = NULL;
     std::vector<HWND> pages[9];
     DWORD activeEventGroup = 0;
@@ -67,6 +70,7 @@ namespace
     bool markOnReply = false;
     bool capturePreset = false;
     bool eventReply = false;
+    DWORD pendingOperation = 0;
     DWORD previewToken = 0;
     bool canUndo = false;
     bool fillingControls = false;
@@ -183,7 +187,8 @@ namespace
             ID_SESSION_ALL, ID_ANNOUNCE_ALL, ID_AUDIT, ID_LEGEND_CATALOG, ID_EVENT_SAVE, ID_EVENT_RUN, ID_EVENT_END };
         for (int i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i)
             EnableWindow(Control(buttons[i]), !busy);
-        EnableWindow(Control(ID_CREATE), !busy && previewToken != 0);
+        EnableWindow(Control(ID_CREATE), !busy);
+        if (lifeButton) EnableWindow(lifeButton, !busy);
         EnableWindow(Control(ID_UNDO_STATS), !busy && canUndo);
         for (int id = ID_SEARCH; id <= ID_HIGH; ++id) EnableWindow(Control(id), !busy);
         for (int i = 0; i < LOCAL_ADMIN_ATTRIBUTE_COUNT; ++i) EnableWindow(Control(ID_ATTRIBUTE + i), !busy);
@@ -231,6 +236,7 @@ namespace
         markOnReply = request.operation == LA_SESSION && request.progressionIndex == 1;
         capturePreset = request.operation == LA_SESSION && request.progressionIndex == 2;
         eventReply = request.progressionIndex == 3 && (request.operation == LA_SUMMON || request.operation == LA_SUMMON_REMOVE);
+        pendingOperation = request.operation;
         if (request.operation == LA_READ)
         {
             catalogReady = false;
@@ -240,7 +246,12 @@ namespace
         packet.h.header.type = CMD_LOCAL_ADMIN;
         packet.h.header.size = sizeof(request);
         memcpy(&packet.u, &request, sizeof(request));
-        QueuePacket(&packet, 1);
+        if (!QueuePacket(&packet, 1))
+        {
+            pendingRequest = 0;
+            Status("Nao foi possivel enfileirar o comando. Verifique a conexao.");
+            return;
+        }
         SetBusy(true);
         Status("Aguardando resposta do MapServer...");
         SetTimer(panel, 1, 10000, NULL);
@@ -274,8 +285,8 @@ namespace
     {
         if (fillingControls) return;
         previewToken = 0;
-        EnableWindow(Control(ID_CREATE), FALSE);
-        SetWindowTextA(Control(ID_PREVIEW_TEXT), "Configure o item e clique em Gerar previa.");
+        EnableWindow(Control(ID_CREATE), !pendingRequest);
+        SetWindowTextA(Control(ID_PREVIEW_TEXT), "Configure o item e adicione ao inventario. A previa e opcional.");
     }
 
     void FillItems()
@@ -378,7 +389,7 @@ namespace
         AddControl("BUTTON", "Legend", BS_AUTOCHECKBOX | WS_TABSTOP, ID_LEGEND, 470, 237, 220, 24, 1);
         for (int i = 0; i < 3; ++i)
             AddControl("COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, ID_EFFECT1 + i, 30, 275 + i * 35, 325, 230, 1);
-        AddControl("EDIT", "Configure o item e clique em Gerar previa.", ES_MULTILINE | ES_READONLY | WS_VSCROLL, ID_PREVIEW_TEXT, 380, 275, 315, 155, 1);
+        AddControl("EDIT", "Configure o item e adicione ao inventario. A previa e opcional.", ES_MULTILINE | ES_READONLY | WS_VSCROLL, ID_PREVIEW_TEXT, 380, 275, 315, 155, 1);
         AddControl("BUTTON", "Gerar previa", WS_TABSTOP, ID_PREVIEW, 30, 397, 150, 32, 1);
         AddControl("BUTTON", "Adicionar ao inventario", WS_TABSTOP, ID_CREATE, 30, 445, 245, 32, 1);
         AddControl("STATIC", "Variante Legend (0 = sorteio)", 0, 0, 380, 437, 220, 20, 1);
@@ -595,7 +606,7 @@ namespace
         case ID_RECOVER_HP:
         case ID_RECOVER_CURSE:
         case ID_REVIVE:
-            request.operation = LA_RECOVER;
+            request.operation = id == ID_REVIVE ? LA_REVIVE : LA_RECOVER;
             request.progressionIndex = id - ID_RECOVER_HP;
             break;
         case ID_TRAINING:
@@ -736,7 +747,9 @@ namespace
             if (id == ID_APPLY_RE) request.state.emblems = value;
             break;
         case ID_PREVIEW:
-            request.operation = LA_PREVIEW;
+        case ID_CREATE:
+            request.operation = id == ID_CREATE ? LA_CREATE : LA_PREVIEW;
+            request.previewToken = id == ID_CREATE ? previewToken : 0;
             request.itemNumber = SelectedValue(ID_ITEMS);
             if (!request.itemNumber || !ReadNumber(ID_QUANTITY, 1000000, value) || !value) { Status("Selecione um item e uma quantidade valida."); return; }
             request.quantity = value;
@@ -760,10 +773,6 @@ namespace
             for (int i = 0; i < 3; ++i) request.effects[i] = SelectedValue(ID_EFFECT1 + i);
             request.dynamicEffect = IsDlgButtonChecked(panel, ID_DYNAMIC) == BST_CHECKED;
             request.highItem = IsDlgButtonChecked(panel, ID_HIGH) == BST_CHECKED;
-            break;
-        case ID_CREATE:
-            request.operation = LA_CREATE;
-            request.previewToken = previewToken;
             break;
         default: return;
         }
@@ -799,7 +808,10 @@ namespace
             }
             KillTimer(window, 2);
             wavesRemaining = 0;
+            if (wParam != 1) break;
             KillTimer(window, 1);
+            if (pendingOperation == LA_REVIVE)
+                AddCurrentStatusMessage(255, 100, 100, "Sem resposta ao reviver. O MapServer precisa da atualizacao do painel GM.");
             pendingRequest = 0;
             previewToken = 0;
             SetBusy(false);
@@ -811,10 +823,8 @@ namespace
     }
 }
 
-void ToggleLocalAdminPanel()
+static void EnsureLocalAdminPanel()
 {
-    if (!GetPrivateProfileIntA("local", "AdminPanel", 0, ".\\dragon.ini")) return;
-    if (!Hero || !SMenu[MN_MAININTERFACE].bActive) return;
     if (!panel)
     {
         INITCOMMONCONTROLSEX controls = { sizeof(controls), ICC_TAB_CLASSES };
@@ -840,6 +850,13 @@ void ToggleLocalAdminPanel()
             WS_POPUP | WS_CAPTION | WS_SYSMENU, left, top,
             770, 600, g_hwndMain, NULL, g_hInstance, NULL);
     }
+}
+
+void ToggleLocalAdminPanel()
+{
+    if (!GetPrivateProfileIntA("local", "AdminPanel", 0, ".\\dragon.ini")) return;
+    if (!Hero || !SMenu[MN_MAININTERFACE].bActive) return;
+    EnsureLocalAdminPanel();
     if (IsWindowVisible(panel)) { ShowWindow(panel, SW_HIDE); return; }
     ShowWindow(panel, SW_SHOW);
     SetForegroundWindow(panel);
@@ -984,6 +1001,8 @@ void ReceiveLocalAdminReply(const void* payload, int length)
         else wavesRemaining = 0;
     }
     Status(reply.message);
+    if (reply.operation == LA_REVIVE)
+        AddCurrentStatusMessage(reply.success ? 80 : 255, reply.success ? 220 : 100, 100, "%s", reply.message);
     SetBusy(false);
 }
 
@@ -1014,3 +1033,59 @@ bool HandleLocalAdminMessage(MSG* message)
     return panel && IsWindowVisible(panel) && IsDialogMessage(panel, message);
 }
 
+
+namespace
+{
+    LRESULT CALLBACK LifeButtonProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        if (message == WM_COMMAND && LOWORD(wParam) == ID_REVIVE && HIWORD(wParam) == BN_CLICKED)
+        {
+            if (!Hero || Hero->viewtype != VIEWTYPE_GHOST_ || pendingRequest) return 0;
+            // Replies and timeout work even when Ctrl+F12 has never been opened.
+            EnsureLocalAdminPanel();
+            LocalAdminRequest request = {};
+            request.operation = LA_REVIVE;
+            SendRequest(request);
+            SetForegroundWindow(g_hwndMain);
+            return 0;
+        }
+        if (message == WM_CLOSE) { ShowWindow(window, SW_HIDE); return 0; }
+        return DefWindowProcA(window, message, wParam, lParam);
+    }
+}
+
+void UpdateLocalAdminLifeButton()
+{
+    static const bool enabled = GetPrivateProfileIntA("local", "AdminPanel", 0, ".\\dragon.ini") != 0;
+    const bool ghost = enabled && Hero && SMenu[MN_MAININTERFACE].bActive && Hero->viewtype == VIEWTYPE_GHOST_;
+    if (!ghost || IsIconic(g_hwndMain))
+    {
+        if (lifeWindow) ShowWindow(lifeWindow, SW_HIDE);
+        return;
+    }
+    if (!lifeWindow)
+    {
+        WNDCLASSA cls = {};
+        cls.lpfnWndProc = LifeButtonProcedure;
+        cls.hInstance = g_hInstance;
+        cls.hCursor = LoadCursor(NULL, IDC_ARROW);
+        cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
+        cls.lpszClassName = "DragonRajaFamilyRevive";
+        RegisterClassA(&cls);
+        lifeWindow = CreateWindowExA(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, cls.lpszClassName, "",
+            WS_POPUP | WS_BORDER, 0, 0, 250, 48, g_hwndMain, NULL, g_hInstance, NULL);
+        lifeButton = CreateWindowExA(0, "BUTTON", "Reviver instantaneamente",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 4, 4, 240, 38, lifeWindow,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_REVIVE)), g_hInstance, NULL);
+        SendMessage(lifeButton, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+    }
+    if (!lifeWindow) return;
+    RECT area;
+    GetClientRect(g_hwndMain, &area);
+    POINT position = { (area.right - 250) / 2, area.bottom - 110 };
+    ClientToScreen(g_hwndMain, &position);
+    SetWindowPos(lifeWindow, NULL, position.x, position.y, 250, 48, SWP_NOACTIVATE | SWP_NOZORDER);
+    EnableWindow(lifeButton, pendingRequest == 0);
+    SetWindowTextA(lifeButton, pendingRequest && pendingOperation == LA_REVIVE ? "Revivendo..." : "Reviver instantaneamente");
+    ShowWindow(lifeWindow, SW_SHOWNOACTIVATE);
+}
